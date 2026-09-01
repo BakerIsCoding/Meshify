@@ -6,4 +6,4 @@ pluginManagement {
 	}
 }
 
-rootProject.name = "pos2obj"
+rootProject.name = "meshify"

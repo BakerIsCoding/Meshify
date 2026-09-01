@@ -3,7 +3,7 @@ plugins {
 }
 
 base {
-	archivesName = "pos2obj"
+	archivesName = "meshify"
 }
 
 dependencies {
@@ -22,6 +22,22 @@ processResources {
 
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 21
+}
+
+// Self-check for the .glb container layout and vertex dedup. A JavaExec on the main
+// classpath rather than a test source set, so the project stays free of a test dependency.
+tasks.register('glbCheck', JavaExec) {
+	group = 'verification'
+	description = 'Validates the GLB writer output'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'com.norwood.meshify.export.GlbWriter'
+}
+
+tasks.register('boxUvCheck', JavaExec) {
+	group = 'verification'
+	description = 'Validates the cuboid texture unwrap, upright and flipped'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'com.norwood.meshify.export.BoxUv'
 }
 
 java {

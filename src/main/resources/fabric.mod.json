@@ -1,19 +1,19 @@
 {
   "schemaVersion": 1,
-  "id": "pos2obj",
+  "id": "meshify",
   "version": "${version}",
-  "name": "Pos2Obj Region Exporter",
-  "description": "Select a region with /pos start and /pos end, then export it to OBJ + MTL + textures with /pos export. Supports modded blocks via baked models, mob heads, chests and fluids.",
+  "name": "Meshify Region Exporter",
+  "description": "Select a region with /pos start and /pos end, then export it to OBJ + MTL + textures with /pos export. Supports modded blocks via baked models, mob heads, chests and fluids. Based on the pos2obj mod on CurseForge by usagi_san.",
   "authors": ["usagi_san"],
   "license": "MIT",
-  "icon": "assets/pos2obj/icon.png",
+  "icon": "assets/meshify/icon.png",
   "environment": "client",
   "entrypoints": {
-    "client": ["com.norwood.pos2obj.Pos2ObjClient"]
+    "client": ["com.norwood.meshify.MeshifyClient"]
   },
   "mixins": [
     {
-      "config": "pos2obj.mixins.json",
+      "config": "meshify.mixins.json",
       "environment": "client"
     }
   ],
@@ -25,7 +25,7 @@
   },
   "custom": {
     "modmenu": {
-      "description_translation_key": "pos2obj.mod.description"
+      "description_translation_key": "meshify.mod.description"
     }
   }
 }
