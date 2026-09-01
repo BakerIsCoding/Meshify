@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "pos2obj",
+  "version": "${version}",
+  "name": "Pos2Obj Region Exporter",
+  "description": "Select a region with /pos start and /pos end, then export it to OBJ + MTL + textures with /pos export. Supports modded blocks via baked models, mob heads, chests and fluids.",
+  "authors": ["usagi_san"],
+  "license": "MIT",
+  "icon": "assets/pos2obj/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.norwood.pos2obj.Pos2ObjClient"]
+  },
+  "mixins": [
+    {
+      "config": "pos2obj.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.17.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  },
+  "custom": {
+    "modmenu": {
+      "description_translation_key": "pos2obj.mod.description"
+    }
+  }
+}
