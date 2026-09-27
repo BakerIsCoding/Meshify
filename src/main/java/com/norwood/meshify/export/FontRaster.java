@@ -18,219 +18,210 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.resource.Resource;
 import net.minecraft.util.Identifier;
 
-/** Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic. */
+/** Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic, one texel per font unit. */
 public final class FontRaster {
-   /** Texels per font unit; 1 already matches the sign's text grid, higher only repeats texels. */
-   public static final int SCALE = 1;
    public static final int LINE_HEIGHT = 10;
    /** Where the default font's baseline sits inside its line; each provider hangs off it. */
    private static final int BASELINE = 7;
    /** From {@code font/include/space.json}: the space character is not in the bitmap sheets. */
    private static final int SPACE_ADVANCE = 4;
+   private static final int DEFAULT_GLYPH_HEIGHT = 8;
+   /** A glyph row is one int of mask bits; vanilla cells are 8 or 9 wide. */
+   private static final int MAX_CELL_WIDTH = 32;
    private static Map<Integer, FontRaster.Glyph> glyphs;
    private static boolean loadFailed;
 
    private FontRaster() {
    }
 
-   public static synchronized boolean ensureLoaded(MinecraftClient mc, List<String> warnings) {
+   public static synchronized boolean ensureLoaded(MinecraftClient client, List<String> warnings) {
       if (glyphs != null) {
          return true;
       } else if (loadFailed) {
          return false;
-      } else {
-         try {
-            glyphs = loadGlyphs(mc);
-            return true;
-         } catch (Exception exception) {
-            loadFailed = true;
-            warnings.add("default font load failed, sign text skipped (" + exception.getMessage() + ")");
-            return false;
-         }
+      }
+
+      try {
+         glyphs = loadGlyphs(client);
+         return true;
+      } catch (Exception exception) {
+         loadFailed = true;
+         warnings.add("default font load failed, sign text skipped (" + exception.getMessage() + ")");
+         return false;
       }
    }
 
    /** Only valid once {@link #ensureLoaded} ran. */
    public static boolean covers(int codePoint) {
-      return codePoint == 32 || glyphs != null && glyphs.containsKey(codePoint);
+      return codePoint == ' ' || glyphs != null && glyphs.containsKey(codePoint);
    }
 
-   private static Map<Integer, FontRaster.Glyph> loadGlyphs(MinecraftClient mc) throws IOException {
-      Map<Integer, FontRaster.Glyph> map = new HashMap<>(1024);
+   private static Map<Integer, FontRaster.Glyph> loadGlyphs(MinecraftClient client) throws IOException {
+      Map<Integer, FontRaster.Glyph> loaded = new HashMap<>(1024);
 
-      for (JsonObject jsonobject : bitmapProviders(mc)) {
-         readSheet(mc, jsonobject, map);
+      for (JsonObject provider : bitmapProviders(client)) {
+         readSheet(client, provider, loaded);
       }
 
       // No 'A' means the sheets were not read, and every sign would export blank without a warning.
-      if (!map.containsKey(65)) {
+      if (!loaded.containsKey((int)'A')) {
          throw new IOException("no Latin glyphs in the default font");
-      } else {
-         return map;
       }
+
+      return loaded;
    }
 
    /** The bitmap providers of the default font stack, highest priority first. */
-   private static List<JsonObject> bitmapProviders(MinecraftClient mc) throws IOException {
-      Identifier identifier = Identifier.of("minecraft", "font/include/default.json");
-      Resource resource = mc.getResourceManager().getResource(identifier).orElseThrow(() -> new IOException("not found: " + identifier));
-      List<JsonObject> list = new ArrayList<>();
+   private static List<JsonObject> bitmapProviders(MinecraftClient client) throws IOException {
+      Identifier fontId = Identifier.ofVanilla("font/include/default.json");
+      Resource resource = client.getResourceManager().getResource(fontId).orElseThrow(() -> new IOException("not found: " + fontId));
+      List<JsonObject> providers = new ArrayList<>();
 
-      try (InputStream inputstream = resource.getInputStream()) {
-         JsonObject jsonobject = JsonParser.parseReader(new InputStreamReader(inputstream, StandardCharsets.UTF_8)).getAsJsonObject();
-         JsonArray jsonarray = jsonobject.getAsJsonArray("providers");
-         if (jsonarray != null) {
-            for (JsonElement jsonelement : jsonarray) {
-               JsonObject jsonobject1 = jsonelement.getAsJsonObject();
-               if (jsonobject1.has("type") && jsonobject1.get("type").getAsString().equals("bitmap") && jsonobject1.has("file")) {
-                  list.add(jsonobject1);
+      try (InputStream in = resource.getInputStream()) {
+         JsonArray all = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonArray("providers");
+         if (all != null) {
+            for (JsonElement element : all) {
+               JsonObject provider = element.getAsJsonObject();
+               if (provider.has("type") && provider.get("type").getAsString().equals("bitmap") && provider.has("file")) {
+                  providers.add(provider);
                }
             }
          }
       }
 
-      if (list.isEmpty()) {
-         throw new IOException("no bitmap providers in " + identifier);
-      } else {
-         return list;
+      if (providers.isEmpty()) {
+         throw new IOException("no bitmap providers in " + fontId);
       }
+
+      return providers;
    }
 
    /** Cuts one sheet into glyphs, keeping only a one-bit-per-pixel mask. */
-   private static void readSheet(MinecraftClient mc, JsonObject provider, Map<Integer, FontRaster.Glyph> out) throws IOException {
-      Identifier identifier = Identifier.of(provider.get("file").getAsString());
-      Identifier identifier1 = Identifier.of(identifier.getNamespace(), "textures/" + identifier.getPath());
-      Optional<Resource> optional = mc.getResourceManager().getResource(identifier1);
-      if (optional.isPresent()) {
-         JsonArray jsonarray = provider.getAsJsonArray("chars");
-         int i = jsonarray.size();
-         int[][] aint = new int[i][];
+   private static void readSheet(MinecraftClient client, JsonObject provider, Map<Integer, FontRaster.Glyph> loaded) throws IOException {
+      Identifier file = Identifier.of(provider.get("file").getAsString());
+      Optional<Resource> sheetResource = client.getResourceManager().getResource(Identifier.of(file.getNamespace(), "textures/" + file.getPath()));
+      if (sheetResource.isEmpty()) {
+         return;
+      }
 
-         for (int j = 0; j < i; j++) {
-            aint[j] = jsonarray.get(j).getAsString().codePoints().toArray();
+      JsonArray chars = provider.getAsJsonArray("chars");
+      int rows = chars.size();
+      int[][] codePoints = new int[rows][];
+
+      for (int row = 0; row < rows; row++) {
+         codePoints[row] = chars.get(row).getAsString().codePoints().toArray();
+      }
+
+      int columns = codePoints[0].length;
+      if (columns == 0) {
+         return;
+      }
+
+      int height = provider.has("height") ? provider.get("height").getAsInt() : DEFAULT_GLYPH_HEIGHT;
+      int ascent = provider.get("ascent").getAsInt();
+
+      try (InputStream in = sheetResource.get().getInputStream(); NativeImage sheet = NativeImage.read(in)) {
+         int cellWidth = sheet.getWidth() / columns;
+         int cellHeight = sheet.getHeight() / rows;
+         if (cellWidth < 1 || cellWidth > MAX_CELL_WIDTH || cellHeight < 1) {
+            return;
          }
 
-         int k = aint[0].length;
-         if (k != 0) {
-            int l = provider.has("height") ? provider.get("height").getAsInt() : 8;
-            int i1 = provider.get("ascent").getAsInt();
-
-            try (InputStream inputstream = optional.get().getInputStream()) {
-               NativeImage nativeimage = NativeImage.read(inputstream);
-
-               try {
-                  int j1 = nativeimage.getWidth() / k;
-                  int k1 = nativeimage.getHeight() / i;
-                  // One int of mask per row; vanilla cells are 8 or 9 wide, so wider ones are skipped.
-                  if (j1 >= 1 && j1 <= 32 && k1 >= 1) {
-                     for (int l1 = 0; l1 < i; l1++) {
-                        for (int i2 = 0; i2 < aint[l1].length && i2 < k; i2++) {
-                           int j2 = aint[l1][i2];
-                           if (j2 != 0) {
-                              out.putIfAbsent(j2, cut(nativeimage, i2 * j1, l1 * k1, j1, k1, l, i1));
-                           }
-                        }
-                     }
-                  }
-               } finally {
-                  nativeimage.close();
+         for (int row = 0; row < rows; row++) {
+            for (int column = 0; column < codePoints[row].length && column < columns; column++) {
+               int codePoint = codePoints[row][column];
+               if (codePoint != 0) {
+                  loaded.putIfAbsent(codePoint, cutGlyph(sheet, column * cellWidth, row * cellHeight, cellWidth, cellHeight, height, ascent));
                }
             }
          }
       }
    }
 
-   private static FontRaster.Glyph cut(NativeImage sheet, int x, int y, int cellW, int cellH, int height, int ascent) {
-      int[] aint = new int[cellH];
-      int i = 0;
+   private static FontRaster.Glyph cutGlyph(NativeImage sheet, int x, int y, int cellWidth, int cellHeight, int height, int ascent) {
+      int[] rows = new int[cellHeight];
+      int width = 0;
 
-      for (int j = 0; j < cellH; j++) {
-         int k = 0;
+      for (int row = 0; row < cellHeight; row++) {
+         int mask = 0;
 
-         for (int l = 0; l < cellW; l++) {
-            if ((sheet.getColorArgb(x + l, y + j) >>> 24) != 0) {
-               k |= 1 << cellW - 1 - l;
-               i = Math.max(i, l + 1);
+         for (int column = 0; column < cellWidth; column++) {
+            if ((sheet.getColorArgb(x + column, y + row) >>> 24) != 0) {
+               mask |= 1 << cellWidth - 1 - column;
+               width = Math.max(width, column + 1);
             }
          }
 
-         aint[j] = k;
+         rows[row] = mask;
       }
 
-      return new FontRaster.Glyph(aint, cellW, cellH, i, height, ascent);
+      return new FontRaster.Glyph(rows, cellWidth, cellHeight, width, height, ascent);
    }
 
-   public static NativeImage render(String[] lines, int rgb, int canvasW, int canvasH) {
-      NativeImage nativeimage = new NativeImage(canvasW, canvasH, false);
+   /** Draws each line centred on a transparent canvas, the block of lines centred vertically. */
+   public static NativeImage render(String[] lines, int rgb, int canvasWidth, int canvasHeight) {
+      NativeImage canvas = new NativeImage(canvasWidth, canvasHeight, false);
+      canvas.fillRect(0, 0, canvasWidth, canvasHeight, 0);
+      int argb = 0xFF000000 | rgb & 0xFFFFFF;
+      int top = Math.max(0, (canvasHeight - lines.length * LINE_HEIGHT) / 2);
 
-      for (int i = 0; i < canvasH; i++) {
-         for (int j = 0; j < canvasW; j++) {
-            nativeimage.setColorArgb(j, i, 0);
+      for (int line = 0; line < lines.length; line++) {
+         String text = lines[line];
+         if (text == null || text.isBlank()) {
+            continue;
+         }
+
+         int[] codePoints = text.codePoints().toArray();
+         int width = 0;
+
+         for (int codePoint : codePoints) {
+            width += advance(codePoint);
+         }
+
+         int penX = Math.max(0, (canvasWidth - width) / 2);
+         int baseline = top + line * LINE_HEIGHT + BASELINE;
+
+         for (int codePoint : codePoints) {
+            FontRaster.Glyph glyph = glyphs.get(codePoint);
+            if (glyph != null) {
+               drawGlyph(canvas, glyph, penX, baseline, argb);
+            }
+
+            penX += advance(codePoint);
          }
       }
 
-      int k = 0xFF000000 | rgb & 16777215;
-      int l = LINE_HEIGHT * SCALE;
-      int i1 = Math.max(0, (canvasH - lines.length * l) / 2);
-
-      for (int j1 = 0; j1 < lines.length; j1++) {
-         String s = lines[j1];
-         if (s != null && !s.isBlank()) {
-            int[] aint = s.codePoints().toArray();
-            int k1 = 0;
-
-            for (int l1 : aint) {
-               k1 += advance(l1);
-            }
-
-            int i2 = Math.max(0, (canvasW - k1) / 2);
-            int j2 = i1 + j1 * l + BASELINE * SCALE;
-
-            for (int k2 : aint) {
-               FontRaster.Glyph fontraster$glyph = glyphs.get(k2);
-               if (fontraster$glyph != null) {
-                  draw(nativeimage, fontraster$glyph, i2, j2, k);
-               }
-
-               i2 += advance(k2);
-            }
-         }
-      }
-
-      return nativeimage;
+      return canvas;
    }
 
    private static int advance(int codePoint) {
-      FontRaster.Glyph fontraster$glyph = glyphs.get(codePoint);
-      return fontraster$glyph == null || codePoint == 32
-         ? SPACE_ADVANCE * SCALE
-         : (Math.round(fontraster$glyph.width() * (float)fontraster$glyph.height() / fontraster$glyph.cellH()) + 1) * SCALE;
+      FontRaster.Glyph glyph = glyphs.get(codePoint);
+      return glyph == null || codePoint == ' ' ? SPACE_ADVANCE : Math.round(glyph.width() * (float)glyph.height() / glyph.cellHeight()) + 1;
    }
 
-   private static void draw(NativeImage canvas, FontRaster.Glyph glyph, int penX, int baseline, int argb) {
-      int i = glyph.height() * SCALE;
-      int j = baseline - glyph.ascent() * SCALE;
-      int k = Math.round(glyph.width() * (float)i / glyph.cellH());
+   /** Draws a glyph scaled from its cell height to its font height, nearest-neighbour. */
+   private static void drawGlyph(NativeImage canvas, FontRaster.Glyph glyph, int penX, int baseline, int argb) {
+      int height = glyph.height();
+      int top = baseline - glyph.ascent();
+      int width = Math.round(glyph.width() * (float)height / glyph.cellHeight());
 
-      for (int l = 0; l < i; l++) {
-         int i1 = glyph.rows()[l * glyph.cellH() / i];
-         if (i1 != 0) {
-            int j1 = j + l;
-            if (j1 >= 0 && j1 < canvas.getHeight()) {
-               for (int k1 = 0; k1 < k; k1++) {
-                  if ((i1 & 1 << glyph.cellW() - 1 - k1 * glyph.cellH() / i) != 0) {
-                     int l1 = penX + k1;
-                     if (l1 >= 0 && l1 < canvas.getWidth()) {
-                        canvas.setColorArgb(l1, j1, argb);
-                     }
-                  }
-               }
+      for (int dy = 0; dy < height; dy++) {
+         int mask = glyph.rows()[dy * glyph.cellHeight() / height];
+         int y = top + dy;
+         if (mask == 0 || y < 0 || y >= canvas.getHeight()) {
+            continue;
+         }
+
+         for (int dx = 0; dx < width; dx++) {
+            int x = penX + dx;
+            if ((mask & 1 << glyph.cellWidth() - 1 - dx * glyph.cellHeight() / height) != 0 && x >= 0 && x < canvas.getWidth()) {
+               canvas.setColorArgb(x, y, argb);
             }
          }
       }
    }
 
    /** One cell of a bitmap sheet: {@code rows} holds one bit per pixel, high bit leftmost. */
-   private record Glyph(int[] rows, int cellW, int cellH, int width, int height, int ascent) {
+   private record Glyph(int[] rows, int cellWidth, int cellHeight, int width, int height, int ascent) {
    }
 }

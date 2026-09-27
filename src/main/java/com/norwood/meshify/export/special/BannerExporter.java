@@ -2,7 +2,7 @@ package com.norwood.meshify.export.special;
 
 import com.norwood.meshify.export.BoxUv;
 import com.norwood.meshify.export.MeshBuilder;
-import com.norwood.meshify.export.TexKey;
+import com.norwood.meshify.export.TextureKey;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.block.AbstractBannerBlock;
@@ -18,173 +18,71 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.BlockRenderView;
 
 public final class BannerExporter {
-   private static final double T = 0.6666666666666666;
-
    private BannerExporter() {
    }
 
+   /** The cuboids are the banner model's, at the 2/3 scale its renderer draws it, so each unwrap is sized apart from its box. */
    public static void export(
-      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractBannerBlock block, double bx, double by, double bz
+      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractBannerBlock block, double blockX, double blockY, double blockZ
    ) {
-      TexKey texkey = buildTexture(world, pos, block.getColor());
-      boolean flag = state.contains(BannerBlock.ROTATION);
-      if (flag) {
-         double d0 = 180.0 + state.get(BannerBlock.ROTATION).intValue() * 22.5;
+      TextureKey texture = buildTexture(world, pos, block.getColor());
+      if (state.contains(BannerBlock.ROTATION)) {
+         double yaw = Yaw.ofRotation(state);
+         // Pole, crossbar, flag.
          BoxUv.emit(
-            mesh,
-            texkey,
-            bx,
-            by,
-            bz,
-            7.333333333333333,
-            0.0,
-            7.333333333333333,
-            8.666666666666666,
-            28.0,
-            8.666666666666666,
-            44,
-            0,
-            2,
-            42,
-            2,
-            64,
-            64,
-            d0,
-            8.0,
-            8.0,
-            0.0
+            mesh, texture, blockX, blockY, blockZ,
+            7.333333333333333, 0.0, 7.333333333333333, 8.666666666666666, 28.0, 8.666666666666666,
+            44, 0, 2, 42, 2, 64, 64, yaw, 0.0, Direction.UP, false
          );
          BoxUv.emit(
-            mesh,
-            texkey,
-            bx,
-            by,
-            bz,
-            1.333333333333334,
-            28.0,
-            7.333333333333333,
-            14.666666666666666,
-            29.333333333333332,
-            8.666666666666666,
-            0,
-            42,
-            20,
-            2,
-            2,
-            64,
-            64,
-            d0,
-            8.0,
-            8.0,
-            0.0
+            mesh, texture, blockX, blockY, blockZ,
+            1.333333333333334, 28.0, 7.333333333333333, 14.666666666666666, 29.333333333333332, 8.666666666666666,
+            0, 42, 20, 2, 2, 64, 64, yaw, 0.0, Direction.UP, false
          );
          BoxUv.emit(
-            mesh,
-            texkey,
-            bx,
-            by,
-            bz,
-            1.333333333333334,
-            2.6666666666666665,
-            6.666666666666667,
-            14.666666666666666,
-            29.333333333333332,
-            7.333333333333333,
-            0,
-            0,
-            20,
-            40,
-            1,
-            64,
-            64,
-            d0,
-            8.0,
-            8.0,
-            0.0
+            mesh, texture, blockX, blockY, blockZ,
+            1.333333333333334, 2.6666666666666665, 6.666666666666667, 14.666666666666666, 29.333333333333332, 7.333333333333333,
+            0, 0, 20, 40, 1, 64, 64, yaw, 0.0, Direction.UP, false
          );
       } else {
-         Direction direction = state.get(Properties.HORIZONTAL_FACING);
-
-         double d1 = switch (direction) {
-            case EAST -> 90.0;
-            case SOUTH -> 180.0;
-            case WEST -> 270.0;
-            default -> 0.0;
-         };
+         double yaw = Yaw.of(state.get(Properties.HORIZONTAL_FACING));
+         // Crossbar, flag.
          BoxUv.emit(
-            mesh,
-            texkey,
-            bx,
-            by,
-            bz,
-            1.333333333333334,
-            12.333333333333332,
-            14.333333333333334,
-            14.666666666666666,
-            13.666666666666666,
-            15.666666666666666,
-            0,
-            42,
-            20,
-            2,
-            2,
-            64,
-            64,
-            d1,
-            8.0,
-            8.0,
-            0.0
+            mesh, texture, blockX, blockY, blockZ,
+            1.333333333333334, 12.333333333333332, 14.333333333333334, 14.666666666666666, 13.666666666666666, 15.666666666666666,
+            0, 42, 20, 2, 2, 64, 64, yaw, 0.0, Direction.UP, false
          );
          BoxUv.emit(
-            mesh,
-            texkey,
-            bx,
-            by,
-            bz,
-            1.333333333333334,
-            -12.999999999999998,
-            13.666666666666668,
-            14.666666666666666,
-            13.666666666666666,
-            14.333333333333334,
-            0,
-            0,
-            20,
-            40,
-            1,
-            64,
-            64,
-            d1,
-            8.0,
-            8.0,
-            0.0
+            mesh, texture, blockX, blockY, blockZ,
+            1.333333333333334, -12.999999999999998, 13.666666666666668, 14.666666666666666, 13.666666666666666, 14.333333333333334,
+            0, 0, 20, 40, 1, 64, 64, yaw, 0.0, Direction.UP, false
          );
       }
    }
 
-   private static TexKey buildTexture(BlockRenderView world, BlockPos pos, DyeColor baseColor) {
-      List<TexKey.CompositeLayer> list = new ArrayList<>();
-      list.add(new TexKey.CompositeLayer(Identifier.of("minecraft", "textures/entity/banner_base.png"), -1));
-      list.add(new TexKey.CompositeLayer(Identifier.of("minecraft", "textures/entity/banner/base.png"), baseColor.getEntityColor() & 16777215));
-      StringBuilder stringbuilder = new StringBuilder();
-      if (world.getBlockEntity(pos) instanceof BannerBlockEntity bannerblockentity) {
-         for (Layer layer : bannerblockentity.getPatterns().layers()) {
-            Identifier identifier = layer.pattern().value().assetId();
-            list.add(
-               new TexKey.CompositeLayer(
-                  Identifier.of(identifier.getNamespace(), "textures/entity/banner/" + identifier.getPath() + ".png"),
-                  layer.color().getEntityColor() & 16777215
+   /** The banner base dyed its colour, with each pattern layer painted on top in its own colour. */
+   private static TextureKey buildTexture(BlockRenderView world, BlockPos pos, DyeColor baseColor) {
+      List<TextureKey.CompositeLayer> layers = new ArrayList<>();
+      layers.add(new TextureKey.CompositeLayer(Identifier.ofVanilla("textures/entity/banner_base.png"), -1));
+      layers.add(new TextureKey.CompositeLayer(Identifier.ofVanilla("textures/entity/banner/base.png"), baseColor.getEntityColor() & 0xFFFFFF));
+      StringBuilder patterns = new StringBuilder();
+      if (world.getBlockEntity(pos) instanceof BannerBlockEntity banner) {
+         for (Layer layer : banner.getPatterns().layers()) {
+            Identifier asset = layer.pattern().value().assetId();
+            layers.add(
+               new TextureKey.CompositeLayer(
+                  Identifier.of(asset.getNamespace(), "textures/entity/banner/" + asset.getPath() + ".png"), layer.color().getEntityColor() & 0xFFFFFF
                )
             );
-            stringbuilder.append(identifier).append('#').append(layer.color().getId()).append(';');
+            patterns.append(asset).append('#').append(layer.color().getId()).append(';');
          }
       }
 
-      String s = "banner_" + baseColor.getId();
-      if (stringbuilder.length() > 0) {
-         s = s + "_" + Integer.toHexString(stringbuilder.toString().hashCode());
+      String id = "banner_" + baseColor.getId();
+      if (!patterns.isEmpty()) {
+         id = id + "_" + Integer.toHexString(patterns.toString().hashCode());
       }
 
-      return TexKey.composite(TexKey.sanitize(s), list);
+      return TextureKey.composite(TextureKey.sanitize(id), layers);
    }
 }

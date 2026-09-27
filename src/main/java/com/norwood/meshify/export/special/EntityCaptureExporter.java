@@ -4,7 +4,6 @@ import com.norwood.meshify.export.MeshBuilder;
 import java.util.List;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.entity.EntityRenderManager;
-import net.minecraft.client.render.entity.state.EntityRenderState;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.component.type.MapIdComponent;
@@ -19,47 +18,39 @@ public final class EntityCaptureExporter {
    private EntityCaptureExporter() {
    }
 
-   public static int export(MeshBuilder mesh, MinecraftClient mc, ClientWorld world, BlockPos min, BlockPos max, List<String> warnings) {
-      Box box = new Box(min.getX(), min.getY(), min.getZ(), max.getX() + 1.0, max.getY() + 1.0, max.getZ() + 1.0);
-      List<Entity> list = world.getOtherEntities(null, box, ex -> !(ex instanceof PlayerEntity));
-      if (list.isEmpty()) {
-         return 0;
-      } else {
-         EntityRenderManager entityrendermanager = mc.getEntityRenderDispatcher();
-         int i = 0;
+   /** Captures every entity in the region except players; returns how many produced geometry. */
+   public static int export(MeshBuilder mesh, MinecraftClient client, ClientWorld world, BlockPos min, BlockPos max, List<String> warnings) {
+      List<Entity> entities = world.getOtherEntities(null, Box.enclosing(min, max), entity -> !(entity instanceof PlayerEntity));
+      EntityRenderManager renderManager = client.getEntityRenderDispatcher();
+      int captured = 0;
 
-         for (Entity entity : list) {
-            try {
-               EntityRenderState entityrenderstate = entityrendermanager.getAndUpdateRenderState(entity, 0.0F);
-               MatrixStack matrixstack = new MatrixStack();
-               CaptureQueue capturequeue = new CaptureQueue(mesh, mc, warnings);
-               if (entity instanceof ItemFrameEntity itemframeentity) {
-                  MapIdComponent mapidcomponent = itemframeentity.getMapId(itemframeentity.getHeldItemStack());
-                  if (mapidcomponent != null) {
-                     capturequeue.contextMapId = mapidcomponent.id();
-                  }
+      for (Entity entity : entities) {
+         try {
+            CaptureQueue queue = new CaptureQueue(mesh, client, warnings);
+            if (entity instanceof ItemFrameEntity frame) {
+               MapIdComponent mapId = frame.getMapId(frame.getHeldItemStack());
+               if (mapId != null) {
+                  queue.itemFrameMapId = mapId.id();
                }
-
-               entityrendermanager.render(
-                  entityrenderstate,
-                  BerCaptureExporter.dummyCamera(entity.getBlockPos()),
-                  entity.getX() - min.getX(),
-                  entity.getY() - min.getY(),
-                  entity.getZ() - min.getZ(),
-                  matrixstack,
-                  capturequeue
-               );
-               if (capturequeue.captured > 0) {
-                  i++;
-               }
-            } catch (Exception exception) {
-               warnings.add(
-                  "entity capture failed: " + Registries.ENTITY_TYPE.getId(entity.getType()) + " @ " + entity.getBlockPos().toShortString() + ": " + exception
-               );
             }
-         }
 
-         return i;
+            renderManager.render(
+               renderManager.getAndUpdateRenderState(entity, 0.0F),
+               BlockEntityCaptureExporter.dummyCamera(entity.getBlockPos()),
+               entity.getX() - min.getX(),
+               entity.getY() - min.getY(),
+               entity.getZ() - min.getZ(),
+               new MatrixStack(),
+               queue
+            );
+            if (queue.capturedQuads > 0) {
+               captured++;
+            }
+         } catch (Exception exception) {
+            warnings.add("entity capture failed: " + Registries.ENTITY_TYPE.getId(entity.getType()) + " @ " + entity.getBlockPos().toShortString() + ": " + exception);
+         }
       }
+
+      return captured;
    }
 }

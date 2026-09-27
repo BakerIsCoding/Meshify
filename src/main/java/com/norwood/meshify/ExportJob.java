@@ -29,7 +29,7 @@ final class ExportJob {
    private static final long SCAN_BUDGET_NANOS = 25_000_000L;
    /** Below this much of the scan, the time left swings too much to be worth showing. */
    private static final double MIN_PROGRESS_FOR_ETA = 0.02;
-   private static final SystemToast.Type TOAST = new SystemToast.Type();
+   private static final SystemToast.Type TOAST_TYPE = new SystemToast.Type();
 
    private static volatile ExportJob current;
 
@@ -61,8 +61,8 @@ final class ExportJob {
       return current != null;
    }
 
-   static void start(BlockPos a, BlockPos b, ExportOptions options) {
-      current = new ExportJob(MinecraftClient.getInstance(), new RegionExporter.Scanner(a, b, options), options);
+   static void start(BlockPos firstCorner, BlockPos secondCorner, ExportOptions options) {
+      current = new ExportJob(MinecraftClient.getInstance(), new RegionExporter.Scanner(firstCorner, secondCorner, options), options);
    }
 
    static boolean cancel() {
@@ -107,7 +107,7 @@ final class ExportJob {
 
          RegionExporter.Scan scan = this.scanner.complete();
          this.writing = true;
-         Thread.ofVirtual().name("meshify-export").start(() -> this.write(scan));
+         Thread.ofVirtual().name("meshify-export").start(() -> this.writeFiles(scan));
       } catch (Exception exception) {
          this.endScan(failureMessage(exception));
          this.showToast("meshify.toast.failed");
@@ -117,23 +117,27 @@ final class ExportJob {
    private void endScan(Text message) {
       this.scanner.discard();
       current = null;
-      this.client.inGameHud.setOverlayMessage(Text.empty(), false);
-      this.post(message);
+      this.clearOverlay();
+      this.sendChatMessage(message);
    }
 
-   private void write(RegionExporter.Scan scan) {
+   private void writeFiles(RegionExporter.Scan scan) {
       try {
          this.report(RegionExporter.finish(this.client, scan, this::enterStage));
       } catch (CancellationException cancellation) {
          deleteQuietly(RegionExporter.outputDir(this.client, this.options.name()));
-         this.post(Text.translatable("meshify.msg.cancelled"));
+         this.sendChatMessage(Text.translatable("meshify.msg.cancelled"));
       } catch (Exception exception) {
-         this.post(failureMessage(exception));
+         this.sendChatMessage(failureMessage(exception));
          this.client.execute(() -> this.showToast("meshify.toast.failed"));
       } finally {
          current = null;
-         this.client.execute(() -> this.client.inGameHud.setOverlayMessage(Text.empty(), false));
+         this.client.execute(this::clearOverlay);
       }
+   }
+
+   private void clearOverlay() {
+      this.client.inGameHud.setOverlayMessage(Text.empty(), false);
    }
 
    /** Runs on the writer thread before each step, so cancelling throws here. */
@@ -178,10 +182,10 @@ final class ExportJob {
    }
 
    private void report(RegionExporter.Result result) {
-      this.post(
+      this.sendChatMessage(
          Text.translatable(
             "meshify.msg.done",
-            String.format(Locale.ROOT, "%.1f", this.elapsedSeconds()),
+            oneDecimal(this.elapsedSeconds()),
             result.blocksExported(),
             result.entitiesExported(),
             result.facesEmitted()
@@ -189,45 +193,44 @@ final class ExportJob {
       );
       BakeCollector.Stats bakeStats = result.bakeStats();
       if (bakeStats != null) {
-         double reduction = bakeStats.facesConsumed() > 0 ? 100.0 * (1.0 - (double)bakeStats.quadsEmitted() / bakeStats.facesConsumed()) : 0.0;
-         this.post(
+         this.sendChatMessage(
             Text.translatable(
                   "meshify.msg.bake_summary",
                   bakeStats.facesConsumed(),
                   bakeStats.quadsEmitted(),
-                  String.format(Locale.ROOT, "%.1f", reduction),
+                  oneDecimal(bakeStats.reductionPercent()),
                   bakeStats.sheets(),
-                  String.format(Locale.ROOT, "%.1f", bakeStats.bakedPixels() / 1000000.0)
+                  oneDecimal(bakeStats.megapixels())
                )
                .formatted(Formatting.AQUA)
          );
       }
 
-      MeshBuilder.OptStats optStats = result.optStats();
-      if (optStats != null) {
-         this.post(
+      MeshBuilder.OptimizationStats optimizationStats = result.optimizationStats();
+      if (optimizationStats != null) {
+         this.sendChatMessage(
             Text.translatable(
                   "meshify.msg.weld_summary",
                   result.facesBeforeOptimize(),
                   result.facesEmitted(),
-                  optStats.degenerateRemoved(),
-                  optStats.duplicateRemoved(),
-                  optStats.weldGrid()
+                  optimizationStats.degenerateRemoved(),
+                  optimizationStats.duplicateRemoved(),
+                  optimizationStats.weldGrid()
                )
                .formatted(Formatting.AQUA)
          );
       }
 
       if (!result.skippedTypes().isEmpty()) {
-         this.post(Text.translatable("meshify.msg.skipped", String.join(", ", result.skippedTypes())).formatted(Formatting.YELLOW));
+         this.sendChatMessage(Text.translatable("meshify.msg.skipped", String.join(", ", result.skippedTypes())).formatted(Formatting.YELLOW));
       }
 
       for (String warning : result.warnings()) {
-         this.post(Text.translatable("meshify.msg.warning", warning).formatted(Formatting.YELLOW));
+         this.sendChatMessage(Text.translatable("meshify.msg.warning", warning).formatted(Formatting.YELLOW));
       }
 
       // Last, so the link is the line right above the chat input when the export finishes.
-      this.post(Text.translatable("meshify.msg.saved", folderLink(result.outDir())));
+      this.sendChatMessage(Text.translatable("meshify.msg.saved", folderLink(result.outputDir())));
       this.client.execute(() -> {
          this.showToast("meshify.toast.done");
          this.client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F));
@@ -235,15 +238,19 @@ final class ExportJob {
    }
 
    private void showToast(String titleKey) {
-      SystemToast.show(this.client.getToastManager(), TOAST, Text.translatable(titleKey), Text.literal(this.options.name()));
+      SystemToast.show(this.client.getToastManager(), TOAST_TYPE, Text.translatable(titleKey), Text.literal(this.options.name()));
    }
 
-   private void post(Text text) {
+   private void sendChatMessage(Text text) {
       this.client.execute(() -> {
          if (this.client.player != null) {
             this.client.player.sendMessage(text, false);
          }
       });
+   }
+
+   private static String oneDecimal(double value) {
+      return String.format(Locale.ROOT, "%.1f", value);
    }
 
    private static Text failureMessage(Exception exception) {
@@ -259,6 +266,7 @@ final class ExportJob {
       try (Stream<Path> paths = Files.walk(dir)) {
          paths.sorted(Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
       } catch (IOException ignored) {
+         // Best effort: a half-deleted folder of a cancelled export harms nothing.
       }
    }
 }

@@ -11,78 +11,66 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Direction.AxisDirection;
 
+/** Merges coplanar full-block faces into large quads, each textured from a sheet the faces are painted onto. */
 public final class BakeCollector {
    public static final int LAYER_SOLID = 0;
    public static final int LAYER_ALPHA = 1;
-   private static final float EPS = 1.0E-4F;
+   /** Or'ed onto a layer for light-emitting blocks; faces only merge within the same layer. */
+   public static final int LAYER_EMISSIVE = 2;
+   private static final float EPSILON = 1.0E-4F;
+   /** Edge pixels repeated around every baked rectangle, so sampling never bleeds in a neighbour. */
    private static final int BORDER = 2;
+   private static final int MIN_SHEET_WIDTH = 64;
    private final int uvSize;
-   private final int maxAtlas;
+   private final int maxSheetSize;
    private final Map<BakeCollector.PlaneKey, Map<Long, BakeCollector.Cell>> planes = new HashMap<>();
    private final Map<String, NativeImage> sources = new HashMap<>();
    private int facesConsumed;
 
-   public BakeCollector(int uvSize, int maxAtlas) {
-      this.uvSize = Math.max(1, uvSize);
-      int i = Math.max(256, Math.min(16384, maxAtlas));
-      int j = 256;
-
-      while (j * 2 <= i) {
-         j *= 2;
-      }
-
-      this.maxAtlas = j;
+   public BakeCollector(int uvSize, int maxSheetSize) {
+      this.uvSize = uvSize;
+      // Sheets are powers of two, so the cap rounds down to one.
+      this.maxSheetSize = Integer.highestOneBit(maxSheetSize);
    }
 
-   public boolean tryAdd(double ox, double oy, double oz, Direction face, TexKey tex, float[][] pos, float[][] uv, int layer) {
-      int i = face.getAxis().ordinal();
-      boolean flag = face.getDirection() == AxisDirection.POSITIVE;
-      double[] adouble = new double[]{ox, oy, oz};
-      float f = (float)(adouble[i] + (flag ? 1 : 0));
+   /** Takes a face lying on its block's {@code face} side and covering it whole; false leaves it to the plain mesh. */
+   public boolean tryAdd(double blockX, double blockY, double blockZ, Direction face, TextureKey texture, float[][] positions, float[][] uv, int layer) {
+      int axis = face.getAxis().ordinal();
+      boolean positive = face.getDirection() == AxisDirection.POSITIVE;
+      double[] origin = new double[]{blockX, blockY, blockZ};
+      float plane = (float)(origin[axis] + (positive ? 1 : 0));
 
-      for (float[] afloat : pos) {
-         if (Math.abs(afloat[i] - f) > 1.0E-4F) {
+      for (float[] corner : positions) {
+         if (Math.abs(corner[axis] - plane) > EPSILON) {
             return false;
          }
       }
 
-      int i1 = i == 0 ? 1 : 0;
-      int j1 = i == 2 ? 1 : 2;
-      float[][] afloat1 = new float[4][];
-      int k1 = 0;
+      int uAxis = axis == 0 ? 1 : 0;
+      int vAxis = axis == 2 ? 1 : 2;
+      // The UVs re-ordered by corner position, slot v * 2 + u; four corners filling four distinct slots cover the square.
+      float[][] cornerUv = new float[4][];
 
-      while (k1 < 4) {
-         double d0 = pos[k1][i1] - adouble[i1];
-         double d1 = pos[k1][j1] - adouble[j1];
-         int j = (int)Math.round(d0);
-         int k = (int)Math.round(d1);
-         if (j >= 0 && j <= 1 && k >= 0 && k <= 1) {
-            if (!(Math.abs(d0 - j) > 1.0E-4F) && !(Math.abs(d1 - k) > 1.0E-4F)) {
-               int l = k * 2 + j;
-               if (afloat1[l] != null) {
-                  return false;
-               }
-
-               afloat1[l] = new float[]{uv[k1][0], uv[k1][1]};
-               k1++;
-               continue;
-            }
-
+      for (int k = 0; k < 4; k++) {
+         double du = positions[k][uAxis] - origin[uAxis];
+         double dv = positions[k][vAxis] - origin[vAxis];
+         int cu = (int)Math.round(du);
+         int cv = (int)Math.round(dv);
+         if (cu < 0 || cu > 1 || cv < 0 || cv > 1 || Math.abs(du - cu) > EPSILON || Math.abs(dv - cv) > EPSILON) {
             return false;
          }
 
-         return false;
-      }
-
-      for (float[] afloat2 : afloat1) {
-         if (afloat2 == null) {
+         int slot = cv * 2 + cu;
+         if (cornerUv[slot] != null) {
             return false;
          }
+
+         cornerUv[slot] = new float[]{uv[k][0], uv[k][1]};
       }
 
-      BakeCollector.PlaneKey bakecollector$planekey = new BakeCollector.PlaneKey(i, Math.round(f), flag, layer);
-      long l1 = pack((int)Math.round(adouble[i1]), (int)Math.round(adouble[j1]));
-      this.planes.computeIfAbsent(bakecollector$planekey, k -> new HashMap<>()).put(l1, new BakeCollector.Cell(tex, afloat1));
+      BakeCollector.PlaneKey key = new BakeCollector.PlaneKey(axis, Math.round(plane), positive, layer);
+      long cell = cellKey((int)Math.round(origin[uAxis]), (int)Math.round(origin[vAxis]));
+      this.planes.computeIfAbsent(key, k -> new HashMap<>()).put(cell, new BakeCollector.Cell(texture, cornerUv));
       this.facesConsumed++;
       return true;
    }
@@ -91,329 +79,306 @@ public final class BakeCollector {
       return this.planes.isEmpty();
    }
 
-   private static long pack(int u, int v) {
-      return (long)u << 32 ^ v & 4294967295L;
+   private static long cellKey(int u, int v) {
+      return (long)u << 32 | v & 0xFFFFFFFFL;
    }
 
    public BakeCollector.Stats flush(MeshBuilder mesh, List<String> warnings) {
-      int i = 0;
-      int j = 0;
-      long k = 0L;
+      int quadsEmitted = 0;
+      int sheets = 0;
+      long bakedPixels = 0L;
 
-      // Layer bit 0 is opaque/alpha and bit 1 emissive; faces only merge within the same layer, one sheet each.
-      for (int l = 0; l <= 3; l++) {
-         List<BakeCollector.Rect> list = new ArrayList<>();
+      // One set of sheets per layer: solid or alpha, each with or without emission.
+      for (int layer = 0; layer <= (LAYER_ALPHA | LAYER_EMISSIVE); layer++) {
+         List<BakeCollector.Rect> rects = new ArrayList<>();
 
-         for (Entry<BakeCollector.PlaneKey, Map<Long, BakeCollector.Cell>> entry : this.planes.entrySet()) {
-            if (entry.getKey().layer() == l) {
-               this.greedy(entry.getKey(), entry.getValue(), list);
+         for (Entry<BakeCollector.PlaneKey, Map<Long, BakeCollector.Cell>> plane : this.planes.entrySet()) {
+            if (plane.getKey().layer() == layer) {
+               this.mergeCells(plane.getKey(), plane.getValue(), rects);
             }
          }
 
-         if (!list.isEmpty()) {
-            List<BakeCollector.Placement> list2 = new ArrayList<>();
-            List<int[]> list3 = new ArrayList<>();
-            this.pack(list, list2, list3);
-            String s = "bake_" + ((l & 1) == 0 ? "solid" : "alpha") + ((l & 2) != 0 ? "_emissive" : "");
+         if (rects.isEmpty()) {
+            continue;
+         }
 
-            for (int i1 = 0; i1 < list3.size(); i1++) {
-               int[] aint = list3.get(i1);
-               int j1 = i1;
-               int k1 = aint[0];
-               int l1 = aint[1];
-               List<BakeCollector.Placement> list1 = list2.stream().filter(px -> px.sheet() == j1).toList();
-               TexKey texkey = TexKey.generated(s + "_" + i1, client -> this.render(list1, k1, l1, client, warnings), true);
-               if ((l & 2) != 0) {
-                  mesh.markEmissive(texkey.id());
-               }
+         List<BakeCollector.Placement> placements = new ArrayList<>();
+         List<int[]> sheetSizes = new ArrayList<>();
+         this.packOntoSheets(rects, placements, sheetSizes);
+         boolean emissive = (layer & LAYER_EMISSIVE) != 0;
+         String prefix = "bake_" + ((layer & LAYER_ALPHA) == 0 ? "solid" : "alpha") + (emissive ? "_emissive" : "");
 
-               for (BakeCollector.Placement bakecollector$placement : list1) {
-                  this.emitQuad(mesh, texkey, bakecollector$placement, k1, l1);
-                  i++;
-               }
-
-               k += (long)k1 * l1;
-               j++;
+         for (int sheet = 0; sheet < sheetSizes.size(); sheet++) {
+            int sheetIndex = sheet;
+            int width = sheetSizes.get(sheet)[0];
+            int height = sheetSizes.get(sheet)[1];
+            List<BakeCollector.Placement> onSheet = placements.stream().filter(placement -> placement.sheet() == sheetIndex).toList();
+            TextureKey texture = TextureKey.generated(prefix + "_" + sheet, client -> this.renderSheet(onSheet, width, height, client, warnings), true);
+            if (emissive) {
+               mesh.markEmissive(texture.id());
             }
+
+            for (BakeCollector.Placement placement : onSheet) {
+               this.emitQuad(mesh, texture, placement, width, height);
+               quadsEmitted++;
+            }
+
+            bakedPixels += (long)width * height;
+            sheets++;
          }
       }
 
-      return new BakeCollector.Stats(this.facesConsumed, i, j, k);
+      return new BakeCollector.Stats(this.facesConsumed, quadsEmitted, sheets, bakedPixels);
    }
 
    public void close() {
       this.planes.clear();
 
-      for (NativeImage nativeimage : this.sources.values()) {
-         if (nativeimage != null) {
-            try {
-               nativeimage.close();
-            } catch (Exception exception) {
-            }
+      for (NativeImage image : this.sources.values()) {
+         if (image != null) {
+            image.close();
          }
       }
 
       this.sources.clear();
    }
 
-   private void greedy(BakeCollector.PlaneKey plane, Map<Long, BakeCollector.Cell> cells, List<BakeCollector.Rect> out) {
-      int i = Math.max(1, (this.maxAtlas - 4) / this.uvSize);
-      int j = Integer.MAX_VALUE;
-      int k = Integer.MAX_VALUE;
-      int l = Integer.MIN_VALUE;
-      int i1 = Integer.MIN_VALUE;
+   /** Covers one plane's cells with as few rectangles as it can, none wider or taller than a sheet holds. */
+   private void mergeCells(BakeCollector.PlaneKey plane, Map<Long, BakeCollector.Cell> cells, List<BakeCollector.Rect> out) {
+      int maxCells = Math.max(1, (this.maxSheetSize - 2 * BORDER) / this.uvSize);
+      int minU = Integer.MAX_VALUE;
+      int minV = Integer.MAX_VALUE;
+      int maxU = Integer.MIN_VALUE;
+      int maxV = Integer.MIN_VALUE;
 
-      for (long j1 : cells.keySet()) {
-         int k1 = (int)(j1 >> 32);
-         int l1 = (int)j1;
-         j = Math.min(j, k1);
-         l = Math.max(l, k1);
-         k = Math.min(k, l1);
-         i1 = Math.max(i1, l1);
+      for (long key : cells.keySet()) {
+         int u = (int)(key >> 32);
+         int v = (int)key;
+         minU = Math.min(minU, u);
+         maxU = Math.max(maxU, u);
+         minV = Math.min(minV, v);
+         maxV = Math.max(maxV, v);
       }
 
-      int i3 = l - j + 1;
-      int j3 = i1 - k + 1;
-      boolean[] aboolean = new boolean[i3 * j3];
+      int spanU = maxU - minU + 1;
+      int spanV = maxV - minV + 1;
+      boolean[] covered = new boolean[spanU * spanV];
 
-      for (int k3 = 0; k3 < j3; k3++) {
-         for (int l3 = 0; l3 < i3; l3++) {
-            if (!aboolean[k3 * i3 + l3] && cells.containsKey(pack(j + l3, k + k3))) {
-               int i2 = 1;
+      for (int v = 0; v < spanV; v++) {
+         for (int u = 0; u < spanU; u++) {
+            if (covered[v * spanU + u] || !cells.containsKey(cellKey(minU + u, minV + v))) {
+               continue;
+            }
 
-               while (i2 < i && l3 + i2 < i3 && !aboolean[k3 * i3 + l3 + i2] && cells.containsKey(pack(j + l3 + i2, k + k3))) {
-                  i2++;
-               }
+            int width = 1;
+            while (width < maxCells && u + width < spanU && !covered[v * spanU + u + width] && cells.containsKey(cellKey(minU + u + width, minV + v))) {
+               width++;
+            }
 
-               int j2;
-               label73:
-               for (j2 = 1; j2 < i && k3 + j2 < j3; j2++) {
-                  for (int k2 = 0; k2 < i2; k2++) {
-                     if (aboolean[(k3 + j2) * i3 + l3 + k2] || !cells.containsKey(pack(j + l3 + k2, k + k3 + j2))) {
-                        break label73;
-                     }
+            int height;
+            grow:
+            for (height = 1; height < maxCells && v + height < spanV; height++) {
+               for (int du = 0; du < width; du++) {
+                  if (covered[(v + height) * spanU + u + du] || !cells.containsKey(cellKey(minU + u + du, minV + v + height))) {
+                     break grow;
                   }
                }
+            }
 
-               for (int i4 = 0; i4 < j2; i4++) {
-                  for (int l2 = 0; l2 < i2; l2++) {
-                     aboolean[(k3 + i4) * i3 + l3 + l2] = true;
-                  }
+            for (int dv = 0; dv < height; dv++) {
+               for (int du = 0; du < width; du++) {
+                  covered[(v + dv) * spanU + u + du] = true;
                }
+            }
 
-               out.add(new BakeCollector.Rect(plane, j + l3, k + k3, i2, j2));
+            out.add(new BakeCollector.Rect(plane, minU + u, minV + v, width, height));
+         }
+      }
+   }
+
+   /** Shelf-packs the rectangles, tallest first, onto as many sheets as they need. */
+   private void packOntoSheets(List<BakeCollector.Rect> rects, List<BakeCollector.Placement> out, List<int[]> sheetSizes) {
+      List<BakeCollector.Rect> sorted = new ArrayList<>(rects);
+      sorted.sort(Comparator.comparingInt(BakeCollector.Rect::height).reversed());
+      long area = 0L;
+      int widest = MIN_SHEET_WIDTH;
+
+      for (BakeCollector.Rect rect : sorted) {
+         area += (long)this.padded(rect.width()) * this.padded(rect.height());
+         widest = Math.max(widest, this.padded(rect.width()));
+      }
+
+      int sheetWidth = Math.min(this.maxSheetSize, Math.max(TextureStore.ceilPowerOfTwo(widest), TextureStore.ceilPowerOfTwo((int)Math.ceil(Math.sqrt(area)))));
+      int sheet = 0;
+      int x = 0;
+      int y = 0;
+      int shelfHeight = 0;
+      int usedHeight = 0;
+
+      for (BakeCollector.Rect rect : sorted) {
+         int paddedWidth = this.padded(rect.width());
+         int paddedHeight = this.padded(rect.height());
+         if (x + paddedWidth > sheetWidth) {
+            x = 0;
+            y += shelfHeight;
+            shelfHeight = 0;
+         }
+
+         if (y + paddedHeight > this.maxSheetSize) {
+            sheetSizes.add(new int[]{sheetWidth, TextureStore.ceilPowerOfTwo(usedHeight)});
+            sheet++;
+            x = 0;
+            y = 0;
+            shelfHeight = 0;
+            usedHeight = 0;
+         }
+
+         out.add(new BakeCollector.Placement(rect, sheet, x + BORDER, y + BORDER));
+         x += paddedWidth;
+         shelfHeight = Math.max(shelfHeight, paddedHeight);
+         usedHeight = Math.max(usedHeight, y + paddedHeight);
+      }
+
+      sheetSizes.add(new int[]{sheetWidth, TextureStore.ceilPowerOfTwo(usedHeight)});
+   }
+
+   /** Pixels a run of {@code cells} takes on a sheet, border included. */
+   private int padded(int cells) {
+      return cells * this.uvSize + 2 * BORDER;
+   }
+
+   private NativeImage renderSheet(List<BakeCollector.Placement> placements, int width, int height, MinecraftClient client, List<String> warnings) {
+      NativeImage sheet = new NativeImage(width, height, false);
+      sheet.fillRect(0, 0, width, height, 0);
+
+      for (BakeCollector.Placement placement : placements) {
+         BakeCollector.Rect rect = placement.rect();
+         Map<Long, BakeCollector.Cell> cells = this.planes.get(rect.plane());
+         if (cells == null) {
+            continue;
+         }
+
+         for (int dv = 0; dv < rect.height(); dv++) {
+            for (int du = 0; du < rect.width(); du++) {
+               BakeCollector.Cell cell = cells.get(cellKey(rect.u0() + du, rect.v0() + dv));
+               NativeImage source = cell == null ? null : this.loadSource(cell.texture(), client, warnings);
+               if (source != null) {
+                  this.blit(sheet, source, cell, placement.x() + du * this.uvSize, placement.y() + dv * this.uvSize);
+               }
+            }
+         }
+
+         padBorder(sheet, placement.x(), placement.y(), rect.width() * this.uvSize, rect.height() * this.uvSize);
+      }
+
+      return sheet;
+   }
+
+   /** Paints one cell's texture into a {@code uvSize} square, sampled through the face's corner UVs. */
+   private void blit(NativeImage sheet, NativeImage source, BakeCollector.Cell cell, int sheetX, int sheetY) {
+      int sourceWidth = source.getWidth();
+      int sourceHeight = source.getHeight();
+      float[][] cornerUv = cell.cornerUv();
+
+      for (int py = 0; py < this.uvSize; py++) {
+         float fy = (py + 0.5F) / this.uvSize;
+
+         for (int px = 0; px < this.uvSize; px++) {
+            float fx = (px + 0.5F) / this.uvSize;
+            int sx = Math.clamp((int)(bilerp(cornerUv, 0, fx, fy) * sourceWidth), 0, sourceWidth - 1);
+            int sy = Math.clamp((int)(bilerp(cornerUv, 1, fx, fy) * sourceHeight), 0, sourceHeight - 1);
+            sheet.setColorArgb(sheetX + px, sheetY + py, source.getColorArgb(sx, sy));
+         }
+      }
+   }
+
+   private static float bilerp(float[][] corners, int component, float fx, float fy) {
+      float c00 = corners[0][component];
+      float c10 = corners[1][component];
+      float c01 = corners[2][component];
+      float c11 = corners[3][component];
+      return c00 * (1.0F - fx) * (1.0F - fy) + c10 * fx * (1.0F - fy) + c01 * (1.0F - fx) * fy + c11 * fx * fy;
+   }
+
+   /** Repeats a rectangle's edge pixels outward across its {@link #BORDER}. */
+   private static void padBorder(NativeImage image, int x, int y, int w, int h) {
+      for (int dy = -BORDER; dy < h + BORDER; dy++) {
+         int srcY = Math.clamp(dy, 0, h - 1);
+
+         for (int dx = -BORDER; dx < w + BORDER; dx++) {
+            if (dx >= 0 && dx < w && dy >= 0 && dy < h) {
+               continue;
+            }
+
+            int outX = x + dx;
+            int outY = y + dy;
+            if (outX >= 0 && outY >= 0 && outX < image.getWidth() && outY < image.getHeight()) {
+               image.setColorArgb(outX, outY, image.getColorArgb(x + Math.clamp(dx, 0, w - 1), y + srcY));
             }
          }
       }
    }
 
-   private void pack(List<BakeCollector.Rect> rects, List<BakeCollector.Placement> out, List<int[]> sheetSizes) {
-      List<BakeCollector.Rect> list = new ArrayList<>(rects);
-      list.sort(Comparator.<BakeCollector.Rect>comparingInt(rx -> rx.h()).reversed());
-      long i = 0L;
-      int j = 64;
-
-      for (BakeCollector.Rect bakecollector$rect : list) {
-         i += (long)(bakecollector$rect.w() * this.uvSize + 4) * (bakecollector$rect.h() * this.uvSize + 4);
-         j = Math.max(j, bakecollector$rect.w() * this.uvSize + 4);
+   /** Loads each source texture once; a failed one is remembered as null, so it only warns once. */
+   private NativeImage loadSource(TextureKey texture, MinecraftClient client, List<String> warnings) {
+      if (this.sources.containsKey(texture.id())) {
+         return this.sources.get(texture.id());
       }
 
-      int i2 = Math.min(this.maxAtlas, Math.max(ceilPow2(j), ceilPow2((int)Math.ceil(Math.sqrt(i)))));
-      int j2 = 0;
-      int k = 0;
-      int l = 0;
-      int i1 = 0;
-      int j1 = 0;
-
-      for (BakeCollector.Rect bakecollector$rect1 : list) {
-         int k1 = bakecollector$rect1.w() * this.uvSize + 4;
-         int l1 = bakecollector$rect1.h() * this.uvSize + 4;
-         if (k + k1 > i2) {
-            k = 0;
-            l += i1;
-            i1 = 0;
-         }
-
-         if (l + l1 > this.maxAtlas) {
-            sheetSizes.add(new int[]{i2, ceilPow2(j1)});
-            j2++;
-            k = 0;
-            l = 0;
-            i1 = 0;
-            j1 = 0;
-         }
-
-         out.add(new BakeCollector.Placement(bakecollector$rect1, j2, k + 2, l + 2));
-         k += k1;
-         i1 = Math.max(i1, l1);
-         j1 = Math.max(j1, l + l1);
+      NativeImage image = null;
+      try {
+         image = texture.load(client);
+      } catch (Exception exception) {
+         warnings.add("bake source failed: " + texture.id() + " (" + exception.getMessage() + ")");
       }
 
-      sheetSizes.add(new int[]{i2, ceilPow2(j1)});
+      this.sources.put(texture.id(), image);
+      return image;
    }
 
-   private static int ceilPow2(int v) {
-      int i = 1;
+   private void emitQuad(MeshBuilder mesh, TextureKey texture, BakeCollector.Placement placement, int sheetWidth, int sheetHeight) {
+      BakeCollector.Rect rect = placement.rect();
+      BakeCollector.PlaneKey plane = rect.plane();
+      int axis = plane.axis();
+      int uAxis = axis == 0 ? 1 : 0;
+      int vAxis = axis == 2 ? 1 : 2;
+      float u0 = rect.u0();
+      float u1 = rect.u0() + rect.width();
+      float v0 = rect.v0();
+      float v1 = rect.v0() + rect.height();
+      float[][] planeCorners = new float[][]{{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+      float[][] positions = new float[4][3];
 
-      while (i < v) {
-         i <<= 1;
+      for (int k = 0; k < 4; k++) {
+         positions[k][axis] = plane.slice();
+         positions[k][uAxis] = planeCorners[k][0];
+         positions[k][vAxis] = planeCorners[k][1];
       }
 
-      return i;
-   }
-
-   private NativeImage render(List<BakeCollector.Placement> placements, int width, int height, MinecraftClient mc, List<String> warnings) {
-      NativeImage nativeimage = new NativeImage(width, height, false);
-
-      for (int i = 0; i < height; i++) {
-         for (int j = 0; j < width; j++) {
-            nativeimage.setColorArgb(j, i, 0);
-         }
+      float s0 = (float)placement.x() / sheetWidth;
+      float t0 = (float)placement.y() / sheetHeight;
+      float s1 = (float)(placement.x() + rect.width() * this.uvSize) / sheetWidth;
+      float t1 = (float)(placement.y() + rect.height() * this.uvSize) / sheetHeight;
+      float[][] uv = new float[][]{{s0, t0}, {s1, t0}, {s1, t1}, {s0, t1}};
+      float[] normal = new float[3];
+      normal[axis] = plane.positive() ? 1.0F : -1.0F;
+      // Those corners wind toward +X and +Z but toward -Y (u x v), so the order flips where that disagrees with the face.
+      boolean windsPositive = axis != 1;
+      if (windsPositive != plane.positive()) {
+         swap(positions, 1, 3);
+         swap(uv, 1, 3);
       }
 
-      for (BakeCollector.Placement bakecollector$placement : placements) {
-         Map<Long, BakeCollector.Cell> map = this.planes.get(bakecollector$placement.rect().plane());
-         if (map != null) {
-            BakeCollector.Rect bakecollector$rect = bakecollector$placement.rect();
-
-            for (int k = 0; k < bakecollector$rect.h(); k++) {
-               for (int l = 0; l < bakecollector$rect.w(); l++) {
-                  BakeCollector.Cell bakecollector$cell = map.get(pack(bakecollector$rect.u0() + l, bakecollector$rect.v0() + k));
-                  if (bakecollector$cell != null) {
-                     NativeImage nativeimage1 = this.source(bakecollector$cell.tex(), mc, warnings);
-                     if (nativeimage1 != null) {
-                        this.blit(
-                           nativeimage,
-                           nativeimage1,
-                           bakecollector$cell,
-                           bakecollector$placement.x() + l * this.uvSize,
-                           bakecollector$placement.y() + k * this.uvSize
-                        );
-                     }
-                  }
-               }
-            }
-
-            padBorder(
-               nativeimage,
-               bakecollector$placement.x(),
-               bakecollector$placement.y(),
-               bakecollector$rect.w() * this.uvSize,
-               bakecollector$rect.h() * this.uvSize
-            );
-         }
-      }
-
-      return nativeimage;
+      mesh.addQuad(texture, positions, uv, normal);
    }
 
-   private void blit(NativeImage out, NativeImage src, BakeCollector.Cell cell, int dx, int dy) {
-      int i = src.getWidth();
-      int j = src.getHeight();
-      float[][] afloat = cell.cornerUv();
-
-      for (int k = 0; k < this.uvSize; k++) {
-         float f = (k + 0.5F) / this.uvSize;
-
-         for (int l = 0; l < this.uvSize; l++) {
-            float f1 = (l + 0.5F) / this.uvSize;
-            float f2 = bilerp(afloat, 0, f1, f);
-            float f3 = bilerp(afloat, 1, f1, f);
-            int i1 = clamp((int)(f2 * i), 0, i - 1);
-            int j1 = clamp((int)(f3 * j), 0, j - 1);
-            out.setColorArgb(dx + l, dy + k, src.getColorArgb(i1, j1));
-         }
-      }
+   private static void swap(float[][] array, int i, int j) {
+      float[] first = array[i];
+      array[i] = array[j];
+      array[j] = first;
    }
 
-   private static float bilerp(float[][] corners, int comp, float fx, float fy) {
-      float f = corners[0][comp];
-      float f1 = corners[1][comp];
-      float f2 = corners[2][comp];
-      float f3 = corners[3][comp];
-      return f * (1.0F - fx) * (1.0F - fy) + f1 * fx * (1.0F - fy) + f2 * (1.0F - fx) * fy + f3 * fx * fy;
-   }
-
-   private static void padBorder(NativeImage img, int x, int y, int w, int h) {
-      for (int i = -2; i < h + 2; i++) {
-         int j = clamp(i, 0, h - 1);
-
-         for (int k = -2; k < w + 2; k++) {
-            if (k < 0 || k >= w || i < 0 || i >= h) {
-               int l = clamp(k, 0, w - 1);
-               int i1 = x + k;
-               int j1 = y + i;
-               if (i1 >= 0 && j1 >= 0 && i1 < img.getWidth() && j1 < img.getHeight()) {
-                  img.setColorArgb(i1, j1, img.getColorArgb(x + l, y + j));
-               }
-            }
-         }
-      }
-   }
-
-   private static int clamp(int v, int lo, int hi) {
-      return v < lo ? lo : Math.min(v, hi);
-   }
-
-   private NativeImage source(TexKey tex, MinecraftClient mc, List<String> warnings) {
-      if (this.sources.containsKey(tex.id())) {
-         return this.sources.get(tex.id());
-      } else {
-         NativeImage nativeimage = null;
-
-         try {
-            nativeimage = tex.load(mc);
-         } catch (Exception exception) {
-            warnings.add("bake source failed: " + tex.id() + " (" + exception.getMessage() + ")");
-         }
-
-         this.sources.put(tex.id(), nativeimage);
-         return nativeimage;
-      }
-   }
-
-   private void emitQuad(MeshBuilder mesh, TexKey tex, BakeCollector.Placement p, int sheetW, int sheetH) {
-      BakeCollector.Rect bakecollector$rect = p.rect();
-      BakeCollector.PlaneKey bakecollector$planekey = bakecollector$rect.plane();
-      int i = bakecollector$planekey.axis();
-      int j = i == 0 ? 1 : 0;
-      int k = i == 2 ? 1 : 2;
-      float f = bakecollector$rect.u0();
-      float f1 = bakecollector$rect.u0() + bakecollector$rect.w();
-      float f2 = bakecollector$rect.v0();
-      float f3 = bakecollector$rect.v0() + bakecollector$rect.h();
-      float[][] afloat = new float[4][3];
-      float[][] afloat1 = new float[][]{{f, f2}, {f1, f2}, {f1, f3}, {f, f3}};
-
-      for (int l = 0; l < 4; l++) {
-         afloat[l][i] = bakecollector$planekey.slice();
-         afloat[l][j] = afloat1[l][0];
-         afloat[l][k] = afloat1[l][1];
-      }
-
-      float f7 = (float)p.x() / sheetW;
-      float f4 = (float)p.y() / sheetH;
-      float f5 = (float)(p.x() + bakecollector$rect.w() * this.uvSize) / sheetW;
-      float f6 = (float)(p.y() + bakecollector$rect.h() * this.uvSize) / sheetH;
-      float[][] afloat2 = new float[][]{{f7, f4}, {f5, f4}, {f5, f6}, {f7, f6}};
-      float[] afloat3 = new float[3];
-      afloat3[i] = bakecollector$planekey.positive() ? 1.0F : -1.0F;
-      boolean flag = i != 1;
-      if (flag != bakecollector$planekey.positive()) {
-         swap(afloat, 1, 3);
-         swap(afloat2, 1, 3);
-      }
-
-      mesh.addQuad(tex, afloat, afloat2, afloat3);
-   }
-
-   private static void swap(float[][] a, int i, int j) {
-      float[] afloat = a[i];
-      a[i] = a[j];
-      a[j] = afloat;
-   }
-
-   private record Cell(TexKey tex, float[][] cornerUv) {
+   private record Cell(TextureKey texture, float[][] cornerUv) {
    }
 
    private record Placement(BakeCollector.Rect rect, int sheet, int x, int y) {
@@ -422,9 +387,17 @@ public final class BakeCollector {
    private record PlaneKey(int axis, int slice, boolean positive, int layer) {
    }
 
-   private record Rect(BakeCollector.PlaneKey plane, int u0, int v0, int w, int h) {
+   private record Rect(BakeCollector.PlaneKey plane, int u0, int v0, int width, int height) {
    }
 
    public record Stats(int facesConsumed, int quadsEmitted, int sheets, long bakedPixels) {
+      /** How many fewer quads the merge left, as a percentage of the faces it took. */
+      public double reductionPercent() {
+         return this.facesConsumed > 0 ? 100.0 * (1.0 - (double)this.quadsEmitted / this.facesConsumed) : 0.0;
+      }
+
+      public double megapixels() {
+         return this.bakedPixels / 1000000.0;
+      }
    }
 }

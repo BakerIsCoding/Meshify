@@ -2,7 +2,7 @@ package com.norwood.meshify.export.special;
 
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.ObjTemplate;
-import com.norwood.meshify.export.TexKey;
+import com.norwood.meshify.export.TextureKey;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -21,58 +21,52 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.BlockRenderView;
 
 public final class DecoratedPotExporter {
+   private static final String PLAIN_SIDE = "decorated_pot_side";
+
    private DecoratedPotExporter() {
    }
 
-   public static boolean export(MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, double bx, double by, double bz, List<String> warnings) {
-      ObjTemplate objtemplate;
+   public static boolean export(MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, double blockX, double blockY, double blockZ, List<String> warnings) {
+      ObjTemplate template;
       try {
-         objtemplate = ObjTemplate.get("decorated_pot.obj");
-      } catch (IOException ioexception) {
-         warnings.add("decorated pot template failed: " + ioexception.getMessage());
+         template = ObjTemplate.getOrLoad("decorated_pot.obj");
+      } catch (IOException exception) {
+         warnings.add("decorated pot template failed: " + exception.getMessage());
          return false;
       }
 
-      Direction direction = state.contains(Properties.HORIZONTAL_FACING) ? state.get(Properties.HORIZONTAL_FACING) : Direction.NORTH;
-
-      double d0 = switch (direction) {
-         case EAST -> 90.0;
-         case SOUTH -> 180.0;
-         case WEST -> 270.0;
-         default -> 0.0;
-      };
-      Sherds sherds = world.getBlockEntity(pos) instanceof DecoratedPotBlockEntity decoratedpotblockentity
-         ? decoratedpotblockentity.getSherds()
-         : Sherds.DEFAULT;
-      TexKey texkey3 = TexKey.resource(Identifier.of("minecraft", "textures/entity/decorated_pot/decorated_pot_base.png"));
-      TexKey texkey4 = sherdTexture(sherds.front());
-      TexKey texkey = sherdTexture(sherds.back());
-      TexKey texkey1 = sherdTexture(sherds.left());
-      TexKey texkey2 = sherdTexture(sherds.right());
-      objtemplate.emit(mesh, null, (material, normal) -> {
-         if (!material.contains("decorated_pot_side")) {
-            return texkey3;
+      Direction facing = state.contains(Properties.HORIZONTAL_FACING) ? state.get(Properties.HORIZONTAL_FACING) : Direction.NORTH;
+      Sherds sherds = world.getBlockEntity(pos) instanceof DecoratedPotBlockEntity pot ? pot.getSherds() : Sherds.DEFAULT;
+      TextureKey base = TextureKey.resource(Identifier.ofVanilla("textures/entity/decorated_pot/decorated_pot_base.png"));
+      TextureKey front = sherdTexture(sherds.front());
+      TextureKey back = sherdTexture(sherds.back());
+      TextureKey left = sherdTexture(sherds.left());
+      TextureKey right = sherdTexture(sherds.right());
+      // Which side a face is on, read from its normal in the template's own, unturned frame.
+      template.emit(mesh, null, (material, normal) -> {
+         if (!material.contains(PLAIN_SIDE)) {
+            return base;
          } else if (Math.abs(normal[0]) >= Math.abs(normal[2])) {
-            return normal[0] > 0.0F ? texkey1 : texkey2;
+            return normal[0] > 0.0F ? left : right;
          } else {
-            return normal[2] > 0.0F ? texkey : texkey4;
+            return normal[2] > 0.0F ? back : front;
          }
-      }, bx, by, bz, d0);
+      }, blockX, blockY, blockZ, Yaw.of(facing));
       return true;
    }
 
-   private static TexKey sherdTexture(Optional<Item> sherd) {
-      String s = "decorated_pot_side";
+   private static TextureKey sherdTexture(Optional<Item> sherd) {
+      String name = PLAIN_SIDE;
       if (sherd.isPresent()) {
-         RegistryKey<DecoratedPotPattern> registrykey = DecoratedPotPatterns.fromSherd(sherd.get());
-         if (registrykey != null) {
-            DecoratedPotPattern decoratedpotpattern = Registries.DECORATED_POT_PATTERN.get(registrykey);
-            if (decoratedpotpattern != null) {
-               s = decoratedpotpattern.assetId().getPath();
+         RegistryKey<DecoratedPotPattern> patternKey = DecoratedPotPatterns.fromSherd(sherd.get());
+         if (patternKey != null) {
+            DecoratedPotPattern pattern = Registries.DECORATED_POT_PATTERN.get(patternKey);
+            if (pattern != null) {
+               name = pattern.assetId().getPath();
             }
          }
       }
 
-      return TexKey.resource(Identifier.of("minecraft", "textures/entity/decorated_pot/" + s + ".png"));
+      return TextureKey.resource(Identifier.ofVanilla("textures/entity/decorated_pot/" + name + ".png"));
    }
 }

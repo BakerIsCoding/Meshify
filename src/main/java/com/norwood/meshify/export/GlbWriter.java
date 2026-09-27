@@ -7,20 +7,16 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import com.norwood.meshify.export.TextureStore.UvTransform;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Writes a self-contained .glb for web viewers: unlit, with baked face shading, one atlas and at most three draw calls. */
 public final class GlbWriter {
-   public static final int OPAQUE = 0;
-   public static final int MASK = 1;
-   public static final int BLEND = 2;
-
-   private static final String[] ALPHA_MODE = {"OPAQUE", "MASK", "BLEND"};
-   private static final float[] UV_IDENTITY = {1.0F, 1.0F, 0.0F, 0.0F};
-
    private static final int NEAREST = 9728;
    private static final int CLAMP_TO_EDGE = 33071;
    private static final int ARRAY_BUFFER = 34962;
@@ -33,36 +29,41 @@ public final class GlbWriter {
    private GlbWriter() {
    }
 
-   /** {@code uvXform} is {scaleU, scaleV, offsetU, offsetV} and {@code alphaClass} is OPAQUE/MASK/BLEND, per texture key. */
+   /** The glTF material alpha modes; each gets its own primitive. */
+   public enum AlphaMode {
+      OPAQUE,
+      MASK,
+      BLEND
+   }
+
+   /** {@code uvs} places each texture key in the atlas; a key missing from either map counts as untransformed and opaque. */
    public static void write(
-      Path outDir, String name, byte[] atlasPng, MeshBuilder mesh, Map<String, float[]> uvXform, Map<String, Integer> alphaClass
+      Path outputDir, String name, byte[] atlasPng, MeshBuilder mesh, Map<String, UvTransform> uvs, Map<String, AlphaMode> alphaModes
    ) throws IOException {
-      Bucket[] buckets = {new Bucket(), new Bucket(), new Bucket()};
+      Map<AlphaMode, Bucket> buckets = new EnumMap<>(AlphaMode.class);
 
       for (Map.Entry<String, List<MeshBuilder.Quad>> entry : mesh.quads().entrySet()) {
-         float[] t = uvXform.getOrDefault(entry.getKey(), UV_IDENTITY);
-         Bucket bucket = buckets[clampMode(alphaClass.getOrDefault(entry.getKey(), OPAQUE))];
+         UvTransform uv = uvs.getOrDefault(entry.getKey(), UvTransform.IDENTITY);
+         Bucket bucket = buckets.computeIfAbsent(alphaModes.getOrDefault(entry.getKey(), AlphaMode.OPAQUE), mode -> new Bucket());
          // Emissive faces skip the directional shading, or an unlit export makes them look like dead stone.
-         boolean emissive = mesh.emissiveKeys().contains(entry.getKey());
+         boolean emissive = mesh.emissiveTextureIds().contains(entry.getKey());
 
          for (MeshBuilder.Quad quad : entry.getValue()) {
             byte shade = emissive ? (byte)255 : shadeByte(quad.normal());
-            int[] vi = new int[4];
+            int[] vertexIndices = new int[4];
 
             for (int i = 0; i < 4; i++) {
-               float[] p = quad.pos()[i];
+               float[] corner = quad.positions()[i];
                // glTF's UV origin is top-left like the atlas, so unlike the OBJ path there is no V flip.
-               float u = t[2] + quad.uv()[i][0] * t[0];
-               float v = t[3] + quad.uv()[i][1] * t[1];
-               vi[i] = bucket.vertex(p[0], p[1], p[2], u, v, shade);
+               vertexIndices[i] = bucket.addVertex(corner[0], corner[1], corner[2], uv.u(quad.uv()[i][0]), uv.v(quad.uv()[i][1]), shade);
             }
 
-            bucket.triangle(vi[0], vi[1], vi[2]);
-            bucket.triangle(vi[0], vi[2], vi[3]);
+            bucket.addTriangle(vertexIndices[0], vertexIndices[1], vertexIndices[2]);
+            bucket.addTriangle(vertexIndices[0], vertexIndices[2], vertexIndices[3]);
          }
       }
 
-      Files.write(outDir.resolve(name + ".glb"), build(buckets, atlasPng));
+      Files.write(outputDir.resolve(name + ".glb"), build(buckets, atlasPng));
    }
 
    /** Minecraft's face shading: top 1.0, north/south 0.8, east/west 0.6, bottom 0.5. */
@@ -87,39 +88,35 @@ public final class GlbWriter {
       return c <= 0.04045F ? c / 12.92F : (float)Math.pow((c + 0.055F) / 1.055F, 2.4);
    }
 
-   private static int clampMode(int mode) {
-      return mode < OPAQUE || mode > BLEND ? OPAQUE : mode;
-   }
-
-   private static byte[] build(Bucket[] buckets, byte[] atlasPng) throws IOException {
+   private static byte[] build(Map<AlphaMode, Bucket> buckets, byte[] atlasPng) throws IOException {
       ByteArrayOutputStream bin = new ByteArrayOutputStream();
       List<String> bufferViews = new ArrayList<>();
       List<String> accessors = new ArrayList<>();
       List<String> primitives = new ArrayList<>();
       List<String> materials = new ArrayList<>();
 
-      for (int mode = 0; mode < buckets.length; mode++) {
-         Bucket bucket = buckets[mode];
+      for (Map.Entry<AlphaMode, Bucket> entry : buckets.entrySet()) {
+         Bucket bucket = entry.getValue();
          if (bucket.vertexCount() == 0) {
             continue;
          }
 
-         int n = bucket.vertexCount();
+         int vertexCount = bucket.vertexCount();
          int position = accessor(
-            bin, bufferViews, accessors, bucket.positions(n), ARRAY_BUFFER, FLOAT, "VEC3", n, false, bucket.minMax()
+            bin, bufferViews, accessors, bucket.positions(vertexCount), ARRAY_BUFFER, FLOAT, "VEC3", vertexCount, false, bucket.minMax()
          );
-         int texcoord = accessor(bin, bufferViews, accessors, bucket.texcoords(n), ARRAY_BUFFER, FLOAT, "VEC2", n, false, null);
-         int color = accessor(bin, bufferViews, accessors, bucket.colors(n), ARRAY_BUFFER, UNSIGNED_BYTE, "VEC4", n, true, null);
+         int texcoord = accessor(bin, bufferViews, accessors, bucket.texcoords(vertexCount), ARRAY_BUFFER, FLOAT, "VEC2", vertexCount, false, null);
+         int color = accessor(bin, bufferViews, accessors, bucket.colors(vertexCount), ARRAY_BUFFER, UNSIGNED_BYTE, "VEC4", vertexCount, true, null);
 
          // uint16 indices while the bucket fits, which halves the index block on most exports.
-         boolean small = n <= 65535;
+         boolean shortIndices = vertexCount <= 65535;
          int indices = accessor(
             bin,
             bufferViews,
             accessors,
-            bucket.indices(small),
+            bucket.indices(shortIndices),
             ELEMENT_ARRAY_BUFFER,
-            small ? UNSIGNED_SHORT : UNSIGNED_INT,
+            shortIndices ? UNSIGNED_SHORT : UNSIGNED_INT,
             "SCALAR",
             bucket.indexCount(),
             false,
@@ -127,7 +124,7 @@ public final class GlbWriter {
          );
 
          int material = materials.size();
-         materials.add(material(mode));
+         materials.add(material(entry.getKey()));
          primitives.add(
             "{\"attributes\":{\"POSITION\":" + position + ",\"TEXCOORD_0\":" + texcoord + ",\"COLOR_0\":" + color + "},\"indices\":" + indices
                + ",\"material\":" + material + "}"
@@ -154,21 +151,21 @@ public final class GlbWriter {
       return container(json.getBytes(StandardCharsets.UTF_8), bin.toByteArray());
    }
 
-   private static String material(int mode) {
-      StringBuilder sb = new StringBuilder();
-      sb.append("{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0},\"metallicFactor\":0,\"roughnessFactor\":1},");
-      sb.append("\"extensions\":{\"KHR_materials_unlit\":{}},");
-      sb.append("\"alphaMode\":\"").append(ALPHA_MODE[mode]).append('"');
-      if (mode == MASK) {
-         sb.append(",\"alphaCutoff\":0.5");
+   private static String material(AlphaMode mode) {
+      StringBuilder json = new StringBuilder();
+      json.append("{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0},\"metallicFactor\":0,\"roughnessFactor\":1},");
+      json.append("\"extensions\":{\"KHR_materials_unlit\":{}},");
+      json.append("\"alphaMode\":\"").append(mode.name()).append('"');
+      if (mode == AlphaMode.MASK) {
+         json.append(",\"alphaCutoff\":0.5");
       }
 
       // Foliage and glass are two-sided in-game; single-sided faces would punch holes in the build.
-      if (mode != OPAQUE) {
-         sb.append(",\"doubleSided\":true");
+      if (mode != AlphaMode.OPAQUE) {
+         json.append(",\"doubleSided\":true");
       }
 
-      return sb.append(",\"name\":\"").append(ALPHA_MODE[mode].toLowerCase(java.util.Locale.ROOT)).append("\"}").toString();
+      return json.append(",\"name\":\"").append(mode.name().toLowerCase(Locale.ROOT)).append("\"}").toString();
    }
 
    private static int accessor(
@@ -184,18 +181,18 @@ public final class GlbWriter {
       float[][] minMax
    ) {
       int view = bufferView(bin, bufferViews, data, target);
-      StringBuilder sb = new StringBuilder();
-      sb.append("{\"bufferView\":").append(view).append(",\"componentType\":").append(componentType);
-      sb.append(",\"count\":").append(count).append(",\"type\":\"").append(type).append('"');
+      StringBuilder json = new StringBuilder();
+      json.append("{\"bufferView\":").append(view).append(",\"componentType\":").append(componentType);
+      json.append(",\"count\":").append(count).append(",\"type\":\"").append(type).append('"');
       if (normalized) {
-         sb.append(",\"normalized\":true");
+         json.append(",\"normalized\":true");
       }
 
       if (minMax != null) {
-         sb.append(",\"min\":[").append(join(minMax[0])).append("],\"max\":[").append(join(minMax[1])).append(']');
+         json.append(",\"min\":[").append(join(minMax[0])).append("],\"max\":[").append(join(minMax[1])).append(']');
       }
 
-      accessors.add(sb.append('}').toString());
+      accessors.add(json.append('}').toString());
       return accessors.size() - 1;
    }
 
@@ -203,8 +200,8 @@ public final class GlbWriter {
       pad(bin, 4);
       int offset = bin.size();
       bin.writeBytes(data);
-      String s = "{\"buffer\":0,\"byteOffset\":" + offset + ",\"byteLength\":" + data.length + (target > 0 ? ",\"target\":" + target : "") + "}";
-      bufferViews.add(s);
+      String json = "{\"buffer\":0,\"byteOffset\":" + offset + ",\"byteLength\":" + data.length + (target > 0 ? ",\"target\":" + target : "") + "}";
+      bufferViews.add(json);
       return bufferViews.size() - 1;
    }
 
@@ -241,37 +238,37 @@ public final class GlbWriter {
    }
 
    private static String join(float[] v) {
-      StringBuilder sb = new StringBuilder();
+      StringBuilder joined = new StringBuilder();
       for (int i = 0; i < v.length; i++) {
          if (i > 0) {
-            sb.append(',');
+            joined.append(',');
          }
 
-         sb.append(String.format(java.util.Locale.ROOT, "%.6f", v[i]));
+         joined.append(String.format(Locale.ROOT, "%.6f", v[i]));
       }
 
-      return sb.toString();
+      return joined.toString();
    }
 
    /** One alpha mode's worth of geometry: deduplicated vertices plus a triangle index list. */
    private static final class Bucket {
-      private final Map<Vertex, Integer> lookup = new HashMap<>();
+      private final Map<Vertex, Integer> indexByVertex = new HashMap<>();
       private final List<Vertex> vertices = new ArrayList<>();
       private int[] indices = new int[1024];
       private int indexCount;
       private final float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
       private final float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
 
-      int vertex(float x, float y, float z, float u, float v, byte shade) {
+      int addVertex(float x, float y, float z, float u, float v, byte shade) {
          Vertex key = new Vertex(x, y, z, u, v, shade);
-         Integer existing = this.lookup.get(key);
+         Integer existing = this.indexByVertex.get(key);
          if (existing != null) {
             return existing;
          }
 
          int index = this.vertices.size();
          this.vertices.add(key);
-         this.lookup.put(key, index);
+         this.indexByVertex.put(key, index);
          this.min[0] = Math.min(this.min[0], x);
          this.min[1] = Math.min(this.min[1], y);
          this.min[2] = Math.min(this.min[2], z);
@@ -281,7 +278,7 @@ public final class GlbWriter {
          return index;
       }
 
-      void triangle(int a, int b, int c) {
+      void addTriangle(int a, int b, int c) {
          if (this.indexCount + 3 > this.indices.length) {
             int[] grown = new int[this.indices.length * 2];
             System.arraycopy(this.indices, 0, grown, 0, this.indexCount);
@@ -333,10 +330,10 @@ public final class GlbWriter {
          return buf.array();
       }
 
-      byte[] indices(boolean small) {
-         ByteBuffer buf = ByteBuffer.allocate(this.indexCount * (small ? 2 : 4)).order(ByteOrder.LITTLE_ENDIAN);
+      byte[] indices(boolean shortIndices) {
+         ByteBuffer buf = ByteBuffer.allocate(this.indexCount * (shortIndices ? 2 : 4)).order(ByteOrder.LITTLE_ENDIAN);
          for (int i = 0; i < this.indexCount; i++) {
-            if (small) {
+            if (shortIndices) {
                buf.putShort((short)this.indices[i]);
             } else {
                buf.putInt(this.indices[i]);
@@ -358,67 +355,67 @@ public final class GlbWriter {
       check(shadeByte(new float[]{-1.0F, 0.0F, 0.0F}) == (byte)81, "west face is 0.6 linearised");
       check(shadeByte(new float[]{0.0F, -1.0F, 0.0F}) == (byte)55, "bottom face is 0.5 linearised");
 
-      float[][] afloat = {{0.0F, 1.0F, 0.0F}, {0.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 0.0F}};
-      float[][] afloat1 = {{0.0F, 0.0F}, {0.0F, 1.0F}, {1.0F, 1.0F}, {1.0F, 0.0F}};
-      float[] afloat2 = {0.0F, 1.0F, 0.0F};
-      TexKey texkey = TexKey.generated("stone", mc -> null);
-      TexKey texkey1 = TexKey.generated("leaves", mc -> null);
-      MeshBuilder meshbuilder = new MeshBuilder();
-      meshbuilder.addQuad(texkey, afloat, afloat1, afloat2);
-      meshbuilder.addQuad(texkey, afloat, afloat1, afloat2);
-      meshbuilder.addQuad(texkey1, afloat, afloat1, afloat2);
+      float[][] positions = {{0.0F, 1.0F, 0.0F}, {0.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F, 0.0F}};
+      float[][] uv = {{0.0F, 0.0F}, {0.0F, 1.0F}, {1.0F, 1.0F}, {1.0F, 0.0F}};
+      float[] up = {0.0F, 1.0F, 0.0F};
+      TextureKey stone = TextureKey.generated("stone", client -> null);
+      TextureKey leaves = TextureKey.generated("leaves", client -> null);
+      MeshBuilder mesh = new MeshBuilder();
+      mesh.addQuad(stone, positions, uv, up);
+      mesh.addQuad(stone, positions, uv, up);
+      mesh.addQuad(leaves, positions, uv, up);
 
-      Path path = Files.createTempDirectory("meshify-check");
+      Path dir = Files.createTempDirectory("meshify-check");
       write(
-         path,
+         dir,
          "check",
          new byte[]{1, 2, 3},
-         meshbuilder,
-         Map.of("stone", UV_IDENTITY, "leaves", UV_IDENTITY),
-         Map.of("stone", OPAQUE, "leaves", MASK)
+         mesh,
+         Map.of("stone", UvTransform.IDENTITY, "leaves", UvTransform.IDENTITY),
+         Map.of("stone", AlphaMode.OPAQUE, "leaves", AlphaMode.MASK)
       );
 
-      byte[] abyte = Files.readAllBytes(path.resolve("check.glb"));
-      ByteBuffer bytebuffer = ByteBuffer.wrap(abyte).order(ByteOrder.LITTLE_ENDIAN);
-      check(bytebuffer.getInt() == 0x46546C67, "glTF magic");
-      check(bytebuffer.getInt() == 2, "glTF version 2");
-      check(bytebuffer.getInt() == abyte.length, "header length matches the file");
+      byte[] glb = Files.readAllBytes(dir.resolve("check.glb"));
+      ByteBuffer buf = ByteBuffer.wrap(glb).order(ByteOrder.LITTLE_ENDIAN);
+      check(buf.getInt() == 0x46546C67, "glTF magic");
+      check(buf.getInt() == 2, "glTF version 2");
+      check(buf.getInt() == glb.length, "header length matches the file");
 
-      int i = bytebuffer.getInt();
-      check(bytebuffer.getInt() == 0x4E4F534A, "first chunk is JSON");
-      check(i % 4 == 0, "JSON chunk is 4-byte aligned");
-      byte[] abyte1 = new byte[i];
-      bytebuffer.get(abyte1);
-      String s = new String(abyte1, StandardCharsets.UTF_8).trim();
+      int jsonLength = buf.getInt();
+      check(buf.getInt() == 0x4E4F534A, "first chunk is JSON");
+      check(jsonLength % 4 == 0, "JSON chunk is 4-byte aligned");
+      byte[] jsonBytes = new byte[jsonLength];
+      buf.get(jsonBytes);
+      String json = new String(jsonBytes, StandardCharsets.UTF_8).trim();
 
-      int j = bytebuffer.getInt();
-      check(bytebuffer.getInt() == 0x004E4942, "second chunk is BIN");
-      check(j % 4 == 0, "BIN chunk is 4-byte aligned");
-      check(12 + 8 + i + 8 + j == abyte.length, "chunks fill the file exactly");
+      int binLength = buf.getInt();
+      check(buf.getInt() == 0x004E4942, "second chunk is BIN");
+      check(binLength % 4 == 0, "BIN chunk is 4-byte aligned");
+      check(12 + 8 + jsonLength + 8 + binLength == glb.length, "chunks fill the file exactly");
 
       // Two identical quads must dedup to 4 vertices and 12 indices.
-      check(s.contains("\"count\":4,\"type\":\"VEC3\""), "opaque quads deduplicated to 4 vertices");
-      check(s.contains("\"count\":12,\"type\":\"SCALAR\""), "opaque bucket emitted 12 indices");
-      check(s.contains("\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5"), "cutout material");
-      check(s.contains("\"alphaMode\":\"OPAQUE\""), "opaque material");
-      check(!s.contains("BLEND"), "no empty blend bucket");
-      check(s.contains("KHR_materials_unlit"), "unlit extension declared");
-      check(s.contains("\"magFilter\":9728"), "nearest sampling");
-      check(!s.contains("NORMAL"), "no normal attribute");
-      java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"buffers\":\\[\\{\"byteLength\":(\\d+)").matcher(s);
+      check(json.contains("\"count\":4,\"type\":\"VEC3\""), "opaque quads deduplicated to 4 vertices");
+      check(json.contains("\"count\":12,\"type\":\"SCALAR\""), "opaque bucket emitted 12 indices");
+      check(json.contains("\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5"), "cutout material");
+      check(json.contains("\"alphaMode\":\"OPAQUE\""), "opaque material");
+      check(!json.contains("BLEND"), "no empty blend bucket");
+      check(json.contains("KHR_materials_unlit"), "unlit extension declared");
+      check(json.contains("\"magFilter\":9728"), "nearest sampling");
+      check(!json.contains("NORMAL"), "no normal attribute");
+      java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"buffers\":\\[\\{\"byteLength\":(\\d+)").matcher(json);
       check(matcher.find(), "buffer declared");
-      int k = Integer.parseInt(matcher.group(1));
+      int declared = Integer.parseInt(matcher.group(1));
       // The BIN chunk is padded up to a 4-byte boundary, so it can exceed the buffer by 1-3 bytes.
-      check(k <= j && j - k < 4, "declared buffer length matches the BIN chunk");
+      check(declared <= binLength && binLength - declared < 4, "declared buffer length matches the BIN chunk");
 
-      Files.delete(path.resolve("check.glb"));
-      Files.delete(path);
+      Files.delete(dir.resolve("check.glb"));
+      Files.delete(dir);
       System.out.println("GlbWriter self-check passed");
    }
 
-   private static void check(boolean ok, String what) {
-      if (!ok) {
-         throw new AssertionError("GlbWriter self-check failed: " + what);
+   private static void check(boolean passed, String description) {
+      if (!passed) {
+         throw new AssertionError("GlbWriter self-check failed: " + description);
       }
    }
 }

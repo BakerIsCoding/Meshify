@@ -15,8 +15,8 @@ import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.text.Texts;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Util;
 import net.minecraft.util.hit.BlockHitResult;
@@ -32,9 +32,18 @@ final class MeshifyActions {
    static final String FACING = "facing";
    static final List<String> SIDES = List.of(ALL_SIDES, "up", "down", "north", "south", "east", "west", FACING);
 
-   private static final long WARN_VOLUME = 2000000L;
-   private static final int DEFAULT_BAKE_UV = 16;
-   private static final int DEFAULT_BAKE_MAX = 4096;
+   /** The choices the menu cycles through and the command suggests; the parser accepts anything in range. */
+   static final List<Integer> TEXTURE_SCALES = List.of(1, 2, 4, 8);
+   static final List<Integer> BAKE_UV_SIZES = List.of(8, 16, 32, 64, 128);
+   static final List<Integer> BAKE_MAX_ATLAS_SIZES = List.of(1024, 2048, 4096, 8192);
+   static final int DEFAULT_BAKE_UV_SIZE = 16;
+   static final int DEFAULT_BAKE_MAX_ATLAS = 4096;
+
+   private static final int HIGHEST_TEXTURE_SCALE = 16;
+   private static final int HIGHEST_BAKE_UV_SIZE = 256;
+   private static final int LOWEST_BAKE_MAX_ATLAS = 256;
+   private static final int HIGHEST_BAKE_MAX_ATLAS = 16384;
+   private static final long WARN_ABOVE_VOLUME = 2000000L;
 
    private MeshifyActions() {
    }
@@ -65,35 +74,37 @@ final class MeshifyActions {
          : client.player.getBlockPos();
    }
 
-   static Text cornerSetMessage(Corner corner, BlockPos pos) {
-      Text label = Text.translatable(corner.labelKey);
-      return Selection.isComplete()
-         ? Text.translatable("meshify.msg.pos_set_volume", label, pos.toShortString(), Selection.dimensions(), Selection.volume())
-         : Text.translatable("meshify.msg.pos_set", label, pos.toShortString());
+   /** A corner's coordinates, or "unset". */
+   static Text describeCorner(BlockPos pos) {
+      return pos == null ? Text.translatable("meshify.label.unset") : Text.literal(pos.toShortString());
    }
 
-   static void setCorner(Feedback out, Corner corner, BlockPos pos) {
+   static void setCorner(Feedback feedback, Corner corner, BlockPos pos) {
       Selection.set(corner, pos, MinecraftClient.getInstance().world.getRegistryKey());
-      out.info(cornerSetMessage(corner, pos));
+      Text label = Text.translatable(corner.labelKey);
+      feedback.info(
+         Selection.isComplete()
+            ? Text.translatable("meshify.msg.pos_set_volume", label, pos.toShortString(), Selection.describeSize(), Selection.volume())
+            : Text.translatable("meshify.msg.pos_set", label, pos.toShortString())
+      );
    }
 
-   static void selectSingleBlock(Feedback out) {
+   static void selectSingleBlock(Feedback feedback) {
       MinecraftClient client = MinecraftClient.getInstance();
       BlockPos pos = targetedBlock(client);
       Selection.set(Corner.START, pos, client.world.getRegistryKey());
       Selection.set(Corner.END, pos, client.world.getRegistryKey());
-      out.info(Text.translatable("meshify.msg.here", pos.toShortString()));
+      feedback.info(Text.translatable("meshify.msg.here", pos.toShortString()));
    }
 
-   static void clear(Feedback out) {
+   static void clear(Feedback feedback) {
       Selection.clear();
-      out.info(Text.translatable("meshify.msg.cleared"));
+      feedback.info(Text.translatable("meshify.msg.cleared"));
    }
 
    /** Grows (or, for negative {@code blocks}, shrinks) every side, or only {@code sideName}. */
-   static boolean resize(Feedback out, int blocks, String sideName) {
-      if (!Selection.isComplete()) {
-         out.error(Text.translatable("meshify.error.no_selection"));
+   static boolean resize(Feedback feedback, int blocks, String sideName) {
+      if (!requireSelection(feedback)) {
          return false;
       }
 
@@ -102,14 +113,14 @@ final class MeshifyActions {
       } else {
          Direction side = parseSide(sideName);
          if (side == null) {
-            out.error(Text.translatable("meshify.error.unknown_direction", sideName));
+            feedback.error(Text.translatable("meshify.error.unknown_direction", sideName));
             return false;
          }
 
          Selection.expand(blocks, side);
       }
 
-      out.info(resizedMessage());
+      feedback.info(resizedMessage());
       return true;
    }
 
@@ -118,195 +129,200 @@ final class MeshifyActions {
       return side.equals(FACING) ? Direction.getEntityFacingOrder(MinecraftClient.getInstance().player)[0] : Direction.byId(side);
    }
 
-   static boolean expandVertical(Feedback out) {
-      if (!Selection.isComplete()) {
-         out.error(Text.translatable("meshify.error.no_selection"));
+   static boolean expandVertical(Feedback feedback) {
+      if (!requireSelection(feedback)) {
          return false;
       }
 
       ClientWorld world = MinecraftClient.getInstance().world;
       Selection.expandVertical(world.getBottomY(), world.getBottomY() + world.getHeight() - 1);
-      out.info(resizedMessage());
+      feedback.info(resizedMessage());
       return true;
    }
 
    /** Shrinks the region to the blocks actually in it, dropping the air around them. */
-   static boolean trim(Feedback out) {
-      if (!Selection.isComplete()) {
-         out.error(Text.translatable("meshify.error.no_selection"));
-         return false;
-      }
-
+   static boolean trim(Feedback feedback) {
       ClientWorld world = MinecraftClient.getInstance().world;
-      if (!Selection.matches(world.getRegistryKey())) {
-         out.error(wrongDimensionMessage());
+      if (!requireSelection(feedback) || !requireSameDimension(feedback, world)) {
          return false;
       }
 
       int unloadedChunks = RegionExporter.countUnloadedChunks(world, Selection.min(), Selection.max());
       if (unloadedChunks > 0) {
-         out.error(Text.translatable("meshify.error.trim_unloaded", unloadedChunks));
+         feedback.error(Text.translatable("meshify.error.trim_unloaded", unloadedChunks));
          return false;
       }
 
       Optional<BlockBox> bounds = RegionExporter.solidBounds(world, Selection.min(), Selection.max());
       if (bounds.isEmpty()) {
-         out.error(Text.translatable("meshify.error.trim_empty"));
+         feedback.error(Text.translatable("meshify.error.trim_empty"));
          return false;
       }
 
       BlockBox box = bounds.get();
       Selection.setBounds(new BlockPos(box.getMinX(), box.getMinY(), box.getMinZ()), new BlockPos(box.getMaxX(), box.getMaxY(), box.getMaxZ()));
-      out.info(resizedMessage());
+      feedback.info(resizedMessage());
       return true;
+   }
+
+   private static boolean requireSelection(Feedback feedback) {
+      if (Selection.isComplete()) {
+         return true;
+      }
+
+      feedback.error(Text.translatable("meshify.error.no_selection"));
+      return false;
+   }
+
+   private static boolean requireSameDimension(Feedback feedback, ClientWorld world) {
+      if (Selection.matchesDimension(world.getRegistryKey())) {
+         return true;
+      }
+
+      feedback.error(Text.translatable("meshify.error.wrong_dimension", Selection.dimension.getValue().toString()));
+      return false;
    }
 
    private static Text resizedMessage() {
       return Text.translatable(
-         "meshify.msg.resized", Selection.min().toShortString(), Selection.max().toShortString(), Selection.dimensions(), Selection.volume()
+         "meshify.msg.resized", Selection.min().toShortString(), Selection.max().toShortString(), Selection.describeSize(), Selection.volume()
       );
    }
 
-   private static Text wrongDimensionMessage() {
-      return Text.translatable("meshify.error.wrong_dimension", Selection.dimension.getValue().toString());
-   }
-
    static Text statusLine() {
-      Object start = Selection.start == null ? Text.translatable("meshify.label.unset") : Selection.start.toShortString();
-      Object end = Selection.end == null ? Text.translatable("meshify.label.unset") : Selection.end.toShortString();
+      Text start = describeCorner(Selection.start);
+      Text end = describeCorner(Selection.end);
       return Selection.isComplete()
-         ? Text.translatable("meshify.msg.status_volume", start, end, Selection.dimensions(), Selection.volume())
+         ? Text.translatable("meshify.msg.status_volume", start, end, Selection.describeSize(), Selection.volume())
          : Text.translatable("meshify.msg.status", start, end);
    }
 
-   static boolean cancel(Feedback out) {
+   static boolean cancel(Feedback feedback) {
       if (!ExportJob.cancel()) {
-         out.error(Text.translatable("meshify.error.not_running"));
+         feedback.error(Text.translatable("meshify.error.not_running"));
          return false;
       }
 
-      out.info(Text.translatable("meshify.msg.cancelling"));
+      feedback.info(Text.translatable("meshify.msg.cancelling"));
       return true;
    }
 
-   static void openFolder(Feedback out) {
+   static void openFolder(Feedback feedback) {
       Path root = RegionExporter.exportRoot(MinecraftClient.getInstance());
       root.toFile().mkdirs();
       Util.getOperatingSystem().open(root);
-      out.info(Text.translatable("meshify.msg.open_folder", ExportJob.folderLink(root)));
+      feedback.info(Text.translatable("meshify.msg.open_folder", ExportJob.folderLink(root)));
    }
 
-   /** Starts an export of the selection; a blank {@code optionsStr} reuses the previous run's options. */
-   static boolean export(Feedback out, String name, String optionsStr) {
+   /** Starts an export of the selection; a blank {@code rawOptions} reuses the previous run's options. */
+   static boolean export(Feedback feedback, String name, String rawOptions) {
       if (ExportJob.isRunning()) {
-         out.error(Text.translatable("meshify.error.busy"));
-         return false;
-      }
-
-      if (!Selection.isComplete()) {
-         out.error(Text.translatable("meshify.error.no_selection"));
+         feedback.error(Text.translatable("meshify.error.busy"));
          return false;
       }
 
       MinecraftClient client = MinecraftClient.getInstance();
-      ClientWorld world = client.world;
-      if (!Selection.matches(world.getRegistryKey())) {
-         out.error(wrongDimensionMessage());
+      if (!requireSelection(feedback) || !requireSameDimension(feedback, client.world)) {
          return false;
       }
 
       long volume = Selection.volume();
       if (volume > RegionExporter.MAX_VOLUME) {
-         out.error(Text.translatable("meshify.error.too_large", volume, RegionExporter.MAX_VOLUME));
+         feedback.error(Text.translatable("meshify.error.too_large", volume, RegionExporter.MAX_VOLUME));
          return false;
       }
 
-      int unloadedChunks = RegionExporter.countUnloadedChunks(world, Selection.min(), Selection.max());
+      int unloadedChunks = RegionExporter.countUnloadedChunks(client.world, Selection.min(), Selection.max());
       if (unloadedChunks > 0) {
-         out.info(Text.translatable("meshify.msg.pre_unloaded", unloadedChunks).formatted(Formatting.YELLOW));
+         feedback.info(Text.translatable("meshify.msg.pre_unloaded", unloadedChunks).formatted(Formatting.YELLOW));
       }
 
-      if (volume > WARN_VOLUME) {
-         out.info(Text.translatable("meshify.msg.pre_large", volume).formatted(Formatting.YELLOW));
+      if (volume > WARN_ABOVE_VOLUME) {
+         feedback.info(Text.translatable("meshify.msg.pre_large", volume).formatted(Formatting.YELLOW));
       }
 
       boolean reusingOptions = false;
-      if (optionsStr == null || optionsStr.isBlank()) {
-         optionsStr = Selection.lastOptions;
-         reusingOptions = !optionsStr.isBlank();
+      if (rawOptions == null || rawOptions.isBlank()) {
+         rawOptions = Selection.lastOptions;
+         reusingOptions = !rawOptions.isBlank();
       }
 
       if (name == null || name.isBlank()) {
          name = "export_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
       }
 
-      ExportOptions options = parseOptions(uniqueName(client, name.replaceAll("[^A-Za-z0-9_\\-]", "_")), optionsStr, out);
-      Selection.rememberOptions(optionsStr);
+      ExportOptions options = parseOptions(uniqueName(client, sanitizeName(name)), rawOptions, feedback);
+      Selection.rememberOptions(rawOptions);
       if (reusingOptions) {
-         out.info(Text.translatable("meshify.msg.reused_options", optionsStr).formatted(Formatting.GRAY));
+         feedback.info(Text.translatable("meshify.msg.reused_options", rawOptions).formatted(Formatting.GRAY));
       }
 
-      out.info(Text.translatable("meshify.msg.export_start", volume, describeOptions(options)));
+      feedback.info(Text.translatable("meshify.msg.export_start", volume, describeOptions(options)));
       ExportJob.start(Selection.start, Selection.end, options);
       return true;
    }
 
-   /** Unknown tokens only get a warning, so a typo does not throw away the rest of the command. */
-   static ExportOptions parseOptions(String name, String optionsStr, Feedback out) {
-      boolean atlas = true;
-      boolean weld = false;
-      boolean cull = false;
-      boolean bake = false;
-      int texScale = 1;
-      int bakeUv = DEFAULT_BAKE_UV;
-      int bakeMax = DEFAULT_BAKE_MAX;
+   /** The export folder is named after it, so only characters every file system accepts survive. */
+   static String sanitizeName(String name) {
+      return name.replaceAll("[^A-Za-z0-9_\\-]", "_");
+   }
 
-      for (String token : optionsStr.trim().toLowerCase(Locale.ROOT).split("\\s+")) {
+   /** Unknown tokens only get a warning, so a typo does not throw away the rest of the command. */
+   static ExportOptions parseOptions(String name, String rawOptions, Feedback feedback) {
+      boolean mergeAtlas = true;
+      boolean weldVertices = false;
+      boolean aggressiveCull = false;
+      boolean bake = false;
+      int textureScale = 1;
+      int bakeUvSize = DEFAULT_BAKE_UV_SIZE;
+      int bakeMaxAtlas = DEFAULT_BAKE_MAX_ATLAS;
+
+      for (String token : rawOptions.trim().toLowerCase(Locale.ROOT).split("\\s+")) {
          if (token.isEmpty()) {
             continue;
          }
 
          switch (token) {
-            case "atlas" -> atlas = true;
-            case "separate" -> atlas = false;
-            case "weld" -> weld = true;
-            case "cull" -> cull = true;
+            case "atlas" -> mergeAtlas = true;
+            case "separate" -> mergeAtlas = false;
+            case "weld" -> weldVertices = true;
+            case "cull" -> aggressiveCull = true;
             case "bake" -> bake = true;
             default -> {
                try {
                   if (token.startsWith("uv")) {
-                     bakeUv = Math.max(1, Math.min(256, Integer.parseInt(token.substring(2))));
+                     bakeUvSize = Math.clamp(Integer.parseInt(token.substring(2)), 1, HIGHEST_BAKE_UV_SIZE);
                      bake = true;
                   } else if (token.startsWith("max")) {
-                     bakeMax = Math.max(256, Math.min(16384, Integer.parseInt(token.substring(3))));
+                     bakeMaxAtlas = Math.clamp(Integer.parseInt(token.substring(3)), LOWEST_BAKE_MAX_ATLAS, HIGHEST_BAKE_MAX_ATLAS);
                      bake = true;
                   } else {
-                     texScale = Math.max(1, Math.min(16, Integer.parseInt(token)));
+                     textureScale = Math.clamp(Integer.parseInt(token), 1, HIGHEST_TEXTURE_SCALE);
                   }
                } catch (NumberFormatException notANumber) {
-                  out.info(Text.translatable("meshify.error.unknown_option", token).formatted(Formatting.YELLOW));
+                  feedback.info(Text.translatable("meshify.error.unknown_option", token).formatted(Formatting.YELLOW));
                }
             }
          }
       }
 
-      return new ExportOptions(name, atlas, texScale, weld, cull, bake, bakeUv, bakeMax);
+      return new ExportOptions(name, mergeAtlas, textureScale, weldVertices, aggressiveCull, bake, bakeUvSize, bakeMaxAtlas);
    }
 
    static String formatOptions(ExportOptions options) {
       List<String> tokens = new ArrayList<>();
       tokens.add(options.mergeAtlas() ? "atlas" : "separate");
-      if (options.texScale() > 1) {
-         tokens.add(String.valueOf(options.texScale()));
+      if (options.textureScale() > 1) {
+         tokens.add(String.valueOf(options.textureScale()));
       }
 
       if (options.bake()) {
          tokens.add("bake");
-         if (options.bakeUvSize() != DEFAULT_BAKE_UV) {
+         if (options.bakeUvSize() != DEFAULT_BAKE_UV_SIZE) {
             tokens.add("uv" + options.bakeUvSize());
          }
 
-         if (options.bakeMaxAtlas() != DEFAULT_BAKE_MAX) {
+         if (options.bakeMaxAtlas() != DEFAULT_BAKE_MAX_ATLAS) {
             tokens.add("max" + options.bakeMaxAtlas());
          }
       }
@@ -337,8 +353,8 @@ final class MeshifyActions {
    private static Text describeOptions(ExportOptions options) {
       List<Text> parts = new ArrayList<>();
       parts.add(Text.translatable(options.mergeAtlas() ? "meshify.opt.atlas" : "meshify.opt.separate"));
-      if (options.texScale() > 1) {
-         parts.add(Text.translatable("meshify.opt.scale", options.texScale()));
+      if (options.textureScale() > 1) {
+         parts.add(Text.translatable("meshify.opt.scale", options.textureScale()));
       }
 
       if (options.bake()) {
@@ -353,25 +369,15 @@ final class MeshifyActions {
          parts.add(Text.translatable("meshify.opt.cull"));
       }
 
-      MutableText joined = Text.empty();
-
-      for (int i = 0; i < parts.size(); i++) {
-         if (i > 0) {
-            joined.append(", ");
-         }
-
-         joined.append(parts.get(i));
-      }
-
-      return joined;
+      return Texts.join(parts, Text.literal(", "));
    }
 
    /** Self-check, run with {@code gradlew optionsCheck}. */
    public static void main(String[] args) {
       List<ExportOptions> cases = List.of(
-         new ExportOptions("check", true, 1, false, false, false, DEFAULT_BAKE_UV, DEFAULT_BAKE_MAX),
-         new ExportOptions("check", false, 4, true, true, false, DEFAULT_BAKE_UV, DEFAULT_BAKE_MAX),
-         new ExportOptions("check", true, 2, false, true, true, DEFAULT_BAKE_UV, DEFAULT_BAKE_MAX),
+         new ExportOptions("check", true, 1, false, false, false, DEFAULT_BAKE_UV_SIZE, DEFAULT_BAKE_MAX_ATLAS),
+         new ExportOptions("check", false, 4, true, true, false, DEFAULT_BAKE_UV_SIZE, DEFAULT_BAKE_MAX_ATLAS),
+         new ExportOptions("check", true, 2, false, true, true, DEFAULT_BAKE_UV_SIZE, DEFAULT_BAKE_MAX_ATLAS),
          new ExportOptions("check", false, 8, true, false, true, 64, 8192)
       );
 
@@ -386,6 +392,22 @@ final class MeshifyActions {
          }
       }
 
+      // Every size the menu offers must survive the parser's clamping.
+      for (int size : BAKE_UV_SIZES) {
+         check(parseOptions("check", "uv" + size, Feedback.IGNORE).bakeUvSize() == size, "uv" + size);
+      }
+
+      for (int size : BAKE_MAX_ATLAS_SIZES) {
+         check(parseOptions("check", "max" + size, Feedback.IGNORE).bakeMaxAtlas() == size, "max" + size);
+      }
+
+      check(sanitizeName("my build/2").equals("my_build_2"), "names keep only file-safe characters");
       System.out.println("Options self-check passed");
+   }
+
+   private static void check(boolean passed, String description) {
+      if (!passed) {
+         throw new AssertionError("options self-check failed: " + description);
+      }
    }
 }

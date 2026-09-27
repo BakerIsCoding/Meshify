@@ -1,5 +1,7 @@
 package com.norwood.meshify.export;
 
+import com.norwood.meshify.export.GlbWriter.AlphaMode;
+import com.norwood.meshify.export.TextureStore.UvTransform;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -18,182 +20,160 @@ public final class ObjWriter {
    private ObjWriter() {
    }
 
-   public static void write(MinecraftClient mc, Path outDir, ExportOptions opts, MeshBuilder mesh, List<String> warnings, Consumer<ExportStage> onStage)
+   public static void write(MinecraftClient client, Path outputDir, ExportOptions options, MeshBuilder mesh, List<String> warnings, Consumer<ExportStage> onStage)
       throws IOException {
       onStage.accept(ExportStage.TEXTURES);
-      Files.createDirectories(outDir);
+      Files.createDirectories(outputDir);
 
-      try (TextureStore texturestore = new TextureStore(mc, opts.texScale())) {
-         for (TexKey texkey : mesh.keys().values()) {
-            texturestore.get(texkey, warnings);
+      try (TextureStore textures = new TextureStore(client, options.textureScale())) {
+         for (TextureKey key : mesh.textures().values()) {
+            textures.getOrLoad(key, warnings);
          }
 
-         Map<String, float[]> map = new LinkedHashMap<>();
-         if (!opts.mergeAtlas()) {
-            Path path = outDir.resolve("textures");
-            Files.createDirectories(path);
+         // Separate textures keep their own 0..1 UVs, so only the atlas needs transforms.
+         Map<String, UvTransform> uvs = Map.of();
+         if (!options.mergeAtlas()) {
+            Path textureDir = outputDir.resolve("textures");
+            Files.createDirectories(textureDir);
 
-            for (Entry<String, NativeImage> entry1 : texturestore.images().entrySet()) {
-               entry1.getValue().writeTo(path.resolve(entry1.getKey() + ".png"));
-               map.put(entry1.getKey(), new float[]{1.0F, 1.0F, 0.0F, 0.0F});
+            for (Entry<String, NativeImage> texture : textures.images().entrySet()) {
+               texture.getValue().writeTo(textureDir.resolve(texture.getKey() + ".png"));
             }
 
             warnings.add("no .glb written: it needs a single atlas, so drop the 'separate' option");
          } else {
-            TextureStore.Atlas texturestore$atlas = texturestore.packAtlas();
-
-            for (Entry<String, TextureStore.AtlasEntry> entry : texturestore$atlas.entries().entrySet()) {
-               TextureStore.AtlasEntry texturestore$atlasentry = entry.getValue();
-               map.put(
-                  entry.getKey(),
-                  new float[]{
-                     (float)texturestore$atlasentry.w() / texturestore$atlas.width(),
-                     (float)texturestore$atlasentry.h() / texturestore$atlas.height(),
-                     (float)texturestore$atlasentry.x() / texturestore$atlas.width(),
-                     (float)texturestore$atlasentry.y() / texturestore$atlas.height()
-                  }
-               );
-            }
-
-            Path path1 = outDir.resolve("atlas.png");
-            texturestore$atlas.image().writeTo(path1);
+            TextureStore.Atlas atlas = textures.packAtlas();
+            uvs = atlas.uvs();
+            Path atlasPath = outputDir.resolve("atlas.png");
+            atlas.image().writeTo(atlasPath);
             onStage.accept(ExportStage.GLB);
-            writeGlb(outDir, opts, mesh, map, texturestore, Files.readAllBytes(path1), warnings);
+            writeGlb(outputDir, options, mesh, uvs, textures, Files.readAllBytes(atlasPath), warnings);
          }
 
          onStage.accept(ExportStage.OBJ);
-         writeObj(outDir, opts, mesh, map);
-         writeMtl(outDir, opts, mesh);
+         writeObj(outputDir, options, mesh, uvs);
+         writeMtl(outputDir, options, mesh);
       }
    }
 
    private static void writeGlb(
-      Path outDir, ExportOptions opts, MeshBuilder mesh, Map<String, float[]> uvXform, TextureStore textures, byte[] atlasPng, List<String> warnings
+      Path outputDir, ExportOptions options, MeshBuilder mesh, Map<String, UvTransform> uvs, TextureStore textures, byte[] atlasPng, List<String> warnings
    ) {
       try {
-         Map<String, Integer> map = new LinkedHashMap<>();
+         Map<String, AlphaMode> alphaModes = new LinkedHashMap<>();
 
-         for (Entry<String, NativeImage> entry : textures.images().entrySet()) {
-            map.put(entry.getKey(), classifyAlpha(entry.getKey(), entry.getValue()));
+         for (Entry<String, NativeImage> texture : textures.images().entrySet()) {
+            alphaModes.put(texture.getKey(), classifyAlpha(texture.getKey(), texture.getValue()));
          }
 
-         GlbWriter.write(outDir, opts.name(), atlasPng, mesh, uvXform, map);
+         GlbWriter.write(outputDir, options.name(), atlasPng, mesh, uvs, alphaModes);
       } catch (Exception exception) {
          warnings.add("glb export failed: " + exception);
       }
    }
 
    /** glTF alpha mode read from the pixels, so the special exporters get classified without extra flags. */
-   private static int classifyAlpha(String id, NativeImage img) {
+   private static AlphaMode classifyAlpha(String id, NativeImage image) {
       // ponytail: water and lava only turn translucent through their render layer, which the pixels can't show.
       if (id.startsWith("water")) {
-         return GlbWriter.BLEND;
+         return AlphaMode.BLEND;
       }
 
-      boolean flag = false;
+      boolean hasCutout = false;
 
-      for (int i = 0; i < img.getHeight(); i++) {
-         for (int j = 0; j < img.getWidth(); j++) {
-            int k = img.getColorArgb(j, i) >>> 24 & 0xFF;
-            if (k != 255) {
-               if (k != 0) {
-                  return GlbWriter.BLEND;
+      for (int y = 0; y < image.getHeight(); y++) {
+         for (int x = 0; x < image.getWidth(); x++) {
+            int alpha = image.getColorArgb(x, y) >>> 24;
+            if (alpha != 0xFF) {
+               if (alpha != 0) {
+                  return AlphaMode.BLEND;
                }
 
-               flag = true;
+               hasCutout = true;
             }
          }
       }
 
-      return flag ? GlbWriter.MASK : GlbWriter.OPAQUE;
+      return hasCutout ? AlphaMode.MASK : AlphaMode.OPAQUE;
    }
 
-   private static void writeObj(Path outDir, ExportOptions opts, MeshBuilder mesh, Map<String, float[]> uvXform) throws IOException {
-      LinkedHashMap<String, Integer> linkedhashmap = new LinkedHashMap<>();
-      LinkedHashMap<String, Integer> linkedhashmap1 = new LinkedHashMap<>();
-      LinkedHashMap<String, Integer> linkedhashmap2 = new LinkedHashMap<>();
-      StringBuilder stringbuilder = new StringBuilder();
+   private static void writeObj(Path outputDir, ExportOptions options, MeshBuilder mesh, Map<String, UvTransform> uvs) throws IOException {
+      // Each distinct position, UV and normal is written once; faces refer to them by 1-based index.
+      Map<String, Integer> positions = new LinkedHashMap<>();
+      Map<String, Integer> texcoords = new LinkedHashMap<>();
+      Map<String, Integer> normals = new LinkedHashMap<>();
+      StringBuilder faces = new StringBuilder();
 
-      for (Entry<String, List<MeshBuilder.Quad>> entry : mesh.quads().entrySet()) {
-         String s = entry.getKey();
-         float[] afloat = uvXform.getOrDefault(s, new float[]{1.0F, 1.0F, 0.0F, 0.0F});
-         stringbuilder.append("g ").append(s).append('\n');
-         stringbuilder.append("usemtl ").append(opts.mergeAtlas() ? "atlas" : s).append('\n');
+      for (Entry<String, List<MeshBuilder.Quad>> group : mesh.quads().entrySet()) {
+         String key = group.getKey();
+         UvTransform uv = uvs.getOrDefault(key, UvTransform.IDENTITY);
+         faces.append("g ").append(key).append('\n');
+         faces.append("usemtl ").append(options.mergeAtlas() ? "atlas" : key).append('\n');
 
-         for (MeshBuilder.Quad meshbuilder$quad : entry.getValue()) {
-            int[] aint = new int[4];
-            int[] aint1 = new int[4];
-            String s1 = String.format(Locale.ROOT, "%.4f %.4f %.4f", meshbuilder$quad.normal()[0], meshbuilder$quad.normal()[1], meshbuilder$quad.normal()[2]);
-            int i = linkedhashmap2.computeIfAbsent(s1, kx -> linkedhashmap2.size() + 1);
-
-            for (int j = 0; j < 4; j++) {
-               String s2 = String.format(
-                  Locale.ROOT, "%.5f %.5f %.5f", meshbuilder$quad.pos()[j][0], meshbuilder$quad.pos()[j][1], meshbuilder$quad.pos()[j][2]
-               );
-               aint[j] = linkedhashmap.computeIfAbsent(s2, kx -> linkedhashmap.size() + 1);
-               float f = afloat[2] + meshbuilder$quad.uv()[j][0] * afloat[0];
-               float f1 = afloat[3] + meshbuilder$quad.uv()[j][1] * afloat[1];
-               String s3 = String.format(Locale.ROOT, "%.6f %.6f", f, 1.0F - f1);
-               aint1[j] = linkedhashmap1.computeIfAbsent(s3, kx -> linkedhashmap1.size() + 1);
-            }
-
-            stringbuilder.append('f');
+         for (MeshBuilder.Quad quad : group.getValue()) {
+            int normal = indexOrAdd(normals, String.format(Locale.ROOT, "%.4f %.4f %.4f", quad.normal()[0], quad.normal()[1], quad.normal()[2]));
+            faces.append('f');
 
             for (int k = 0; k < 4; k++) {
-               stringbuilder.append(' ').append(aint[k]).append('/').append(aint1[k]).append('/').append(i);
+               float[] corner = quad.positions()[k];
+               int position = indexOrAdd(positions, String.format(Locale.ROOT, "%.5f %.5f %.5f", corner[0], corner[1], corner[2]));
+               // OBJ's UV origin is bottom-left, the atlas's top-left.
+               int texcoord = indexOrAdd(texcoords, String.format(Locale.ROOT, "%.6f %.6f", uv.u(quad.uv()[k][0]), 1.0F - uv.v(quad.uv()[k][1])));
+               faces.append(' ').append(position).append('/').append(texcoord).append('/').append(normal);
             }
 
-            stringbuilder.append('\n');
+            faces.append('\n');
          }
       }
 
-      Path path = outDir.resolve(opts.name() + ".obj");
-
-      try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
+      try (Writer writer = Files.newBufferedWriter(outputDir.resolve(options.name() + ".obj"), StandardCharsets.UTF_8)) {
          writer.write("# Exported by meshify (Fabric client mod)\n");
          writer.write("# 1 unit = 1 block\n");
-         writer.write("mtllib " + opts.name() + ".mtl\n");
-         writer.write("o " + opts.name() + "\n");
+         writer.write("mtllib " + options.name() + ".mtl\n");
+         writer.write("o " + options.name() + "\n");
 
-         for (String s4 : linkedhashmap.keySet()) {
-            writer.write("v " + s4 + "\n");
+         for (String position : positions.keySet()) {
+            writer.write("v " + position + "\n");
          }
 
-         for (String s5 : linkedhashmap1.keySet()) {
-            writer.write("vt " + s5 + "\n");
+         for (String texcoord : texcoords.keySet()) {
+            writer.write("vt " + texcoord + "\n");
          }
 
-         for (String s6 : linkedhashmap2.keySet()) {
-            writer.write("vn " + s6 + "\n");
+         for (String normal : normals.keySet()) {
+            writer.write("vn " + normal + "\n");
          }
 
-         writer.write(stringbuilder.toString());
+         writer.write(faces.toString());
       }
    }
 
-   private static void writeMtl(Path outDir, ExportOptions opts, MeshBuilder mesh) throws IOException {
-      Path path = outDir.resolve(opts.name() + ".mtl");
+   /** The 1-based OBJ index of {@code value}, adding it if it is new. */
+   private static int indexOrAdd(Map<String, Integer> indices, String value) {
+      return indices.computeIfAbsent(value, v -> indices.size() + 1);
+   }
 
-      try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
-         if (opts.mergeAtlas()) {
+   private static void writeMtl(Path outputDir, ExportOptions options, MeshBuilder mesh) throws IOException {
+      try (Writer writer = Files.newBufferedWriter(outputDir.resolve(options.name() + ".mtl"), StandardCharsets.UTF_8)) {
+         if (options.mergeAtlas()) {
             // One shared material, so it can only be emissive if every texture on it is.
-            writer.write(material("atlas", "atlas.png", mesh.emissiveKeys().containsAll(mesh.keys().keySet())));
+            writer.write(material("atlas", "atlas.png", mesh.emissiveTextureIds().containsAll(mesh.textures().keySet())));
          } else {
-            for (String s : mesh.keys().keySet()) {
-               writer.write(material(s, "textures/" + s + ".png", mesh.emissiveKeys().contains(s)));
+            for (String key : mesh.textures().keySet()) {
+               writer.write(material(key, "textures/" + key + ".png", mesh.emissiveTextureIds().contains(key)));
             }
          }
       }
    }
 
-   private static String material(String name, String texPath, boolean emissive) {
+   private static String material(String name, String texturePath, boolean emissive) {
       return "newmtl "
          + name
          + "\nKd 1.000 1.000 1.000\nKs 0.000 0.000 0.000\nd 1.0\nillum 2\nmap_Kd "
-         + texPath
+         + texturePath
          + "\nmap_d "
-         + texPath
-         + (emissive ? "\nKe 1.000 1.000 1.000\nmap_Ke " + texPath : "")
+         + texturePath
+         + (emissive ? "\nKe 1.000 1.000 1.000\nmap_Ke " + texturePath : "")
          + "\n\n";
    }
 }

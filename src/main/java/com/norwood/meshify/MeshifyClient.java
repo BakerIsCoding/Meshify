@@ -1,7 +1,9 @@
 package com.norwood.meshify;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
@@ -9,9 +11,12 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.norwood.meshify.MeshifyActions.Feedback;
 import com.norwood.meshify.Selection.Corner;
 import com.norwood.meshify.export.RegionExporter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -22,93 +27,34 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
 public class MeshifyClient implements ClientModInitializer {
-   private static final List<MeshifyClient.Option> OPTIONS = List.of(
-      new MeshifyClient.Option("atlas", "meshify.opt.desc.atlas", null),
-      new MeshifyClient.Option("separate", "meshify.opt.desc.separate", null),
-      new MeshifyClient.Option("bake", "meshify.opt.desc.bake", null),
-      new MeshifyClient.Option("weld", "meshify.opt.desc.weld", null),
-      new MeshifyClient.Option("cull", "meshify.opt.desc.cull", null),
-      new MeshifyClient.Option("uv8", "meshify.opt.desc.uv", 8),
-      new MeshifyClient.Option("uv16", "meshify.opt.desc.uv_default", 16),
-      new MeshifyClient.Option("uv32", "meshify.opt.desc.uv", 32),
-      new MeshifyClient.Option("uv64", "meshify.opt.desc.uv", 64),
-      new MeshifyClient.Option("uv128", "meshify.opt.desc.uv", 128),
-      new MeshifyClient.Option("max1024", "meshify.opt.desc.max", 1024),
-      new MeshifyClient.Option("max2048", "meshify.opt.desc.max", 2048),
-      new MeshifyClient.Option("max4096", "meshify.opt.desc.max_default", 4096),
-      new MeshifyClient.Option("max8192", "meshify.opt.desc.max", 8192),
-      new MeshifyClient.Option("2", "meshify.opt.desc.scale", 2),
-      new MeshifyClient.Option("4", "meshify.opt.desc.scale", 4),
-      new MeshifyClient.Option("8", "meshify.opt.desc.scale", 8)
-   );
+   private static final List<OptionSuggestion> OPTION_SUGGESTIONS = optionSuggestions();
 
    @Override
    public void onInitializeClient() {
       SelectionRenderer.register();
       MeshifyScreen.register();
       ExportJob.register();
-      ClientLifecycleEvents.CLIENT_STARTED.register(client -> Selection.init(RegionExporter.exportRoot(client)));
+      ClientLifecycleEvents.CLIENT_STARTED.register(client -> Selection.loadSession(RegionExporter.exportRoot(client)));
       ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
          ClientCommandManager.literal("meshify")
             .then(ClientCommandManager.literal("gui").executes(ctx -> openMenu(ctx.getSource().getClient())))
-            .then(
-               ClientCommandManager.literal("start")
-                  .executes(ctx -> setPos(ctx.getSource(), Corner.START, null))
-                  .then(
-                     ClientCommandManager.argument("x", IntegerArgumentType.integer())
-                        .then(
-                           ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                              .then(
-                                 ClientCommandManager.argument("z", IntegerArgumentType.integer())
-                                    .executes(ctx -> setPos(ctx.getSource(), Corner.START, posFromArgs(ctx)))
-                              )
-                        )
-                  )
-            )
-            .then(
-               ClientCommandManager.literal("end")
-                  .executes(ctx -> setPos(ctx.getSource(), Corner.END, null))
-                  .then(
-                     ClientCommandManager.argument("x", IntegerArgumentType.integer())
-                        .then(
-                           ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                              .then(
-                                 ClientCommandManager.argument("z", IntegerArgumentType.integer())
-                                    .executes(ctx -> setPos(ctx.getSource(), Corner.END, posFromArgs(ctx)))
-                              )
-                        )
-                  )
-            )
-            .then(ClientCommandManager.literal("here").executes(ctx -> {
-               MeshifyActions.selectSingleBlock(Feedback.of(ctx.getSource()));
-               return 1;
-            }))
+            .then(cornerCommand("start", Corner.START))
+            .then(cornerCommand("end", Corner.END))
+            .then(ClientCommandManager.literal("here").executes(always(MeshifyActions::selectSingleBlock)))
             .then(
                ClientCommandManager.literal("expand")
-                  .then(
-                     ClientCommandManager.literal("vert")
-                        .executes(ctx -> result(MeshifyActions.expandVertical(Feedback.of(ctx.getSource()))))
-                  )
+                  .then(ClientCommandManager.literal("vert").executes(attempt(MeshifyActions::expandVertical)))
                   .then(resizeArgument(1))
             )
             .then(ClientCommandManager.literal("shrink").then(resizeArgument(-1)))
-            .then(
-               ClientCommandManager.literal("trim")
-                  .executes(ctx -> result(MeshifyActions.trim(Feedback.of(ctx.getSource()))))
-            )
-            .then(ClientCommandManager.literal("clear").executes(ctx -> {
-               MeshifyActions.clear(Feedback.of(ctx.getSource()));
-               return 1;
-            }))
+            .then(ClientCommandManager.literal("trim").executes(attempt(MeshifyActions::trim)))
+            .then(ClientCommandManager.literal("clear").executes(always(MeshifyActions::clear)))
             .then(ClientCommandManager.literal("status").executes(ctx -> {
                ctx.getSource().sendFeedback(MeshifyActions.statusLine());
                return 1;
             }))
-            .then(ClientCommandManager.literal("cancel").executes(ctx -> result(MeshifyActions.cancel(Feedback.of(ctx.getSource())))))
-            .then(ClientCommandManager.literal("open").executes(ctx -> {
-               MeshifyActions.openFolder(Feedback.of(ctx.getSource()));
-               return 1;
-            }))
+            .then(ClientCommandManager.literal("cancel").executes(attempt(MeshifyActions::cancel)))
+            .then(ClientCommandManager.literal("open").executes(always(MeshifyActions::openFolder)))
             .then(
                ClientCommandManager.literal("export")
                   .executes(ctx -> export(ctx, null, null))
@@ -125,9 +71,49 @@ public class MeshifyClient implements ClientModInitializer {
       ));
    }
 
+   /** The export options offered as suggestions: every flag and every size the menu offers except the default scale. */
+   private static List<OptionSuggestion> optionSuggestions() {
+      List<OptionSuggestion> suggestions = new ArrayList<>();
+
+      for (String flag : List.of("atlas", "separate", "bake", "weld", "cull")) {
+         suggestions.add(new OptionSuggestion(flag, "meshify.opt.desc." + flag, null));
+      }
+
+      for (int size : MeshifyActions.BAKE_UV_SIZES) {
+         suggestions.add(new OptionSuggestion("uv" + size, size == MeshifyActions.DEFAULT_BAKE_UV_SIZE ? "meshify.opt.desc.uv_default" : "meshify.opt.desc.uv", size));
+      }
+
+      for (int size : MeshifyActions.BAKE_MAX_ATLAS_SIZES) {
+         suggestions.add(
+            new OptionSuggestion("max" + size, size == MeshifyActions.DEFAULT_BAKE_MAX_ATLAS ? "meshify.opt.desc.max_default" : "meshify.opt.desc.max", size)
+         );
+      }
+
+      for (int scale : MeshifyActions.TEXTURE_SCALES) {
+         if (scale > 1) {
+            suggestions.add(new OptionSuggestion(String.valueOf(scale), "meshify.opt.desc.scale", scale));
+         }
+      }
+
+      return suggestions;
+   }
+
    /** Brigadier's convention: 1 when the command did something, 0 when it was refused. */
-   private static int result(boolean succeeded) {
+   private static int commandResult(boolean succeeded) {
       return succeeded ? 1 : 0;
+   }
+
+   /** A command that always goes through. */
+   private static Command<FabricClientCommandSource> always(Consumer<Feedback> action) {
+      return ctx -> {
+         action.accept(Feedback.of(ctx.getSource()));
+         return 1;
+      };
+   }
+
+   /** A command the action may refuse, reporting why. */
+   private static Command<FabricClientCommandSource> attempt(Predicate<Feedback> action) {
+      return ctx -> commandResult(action.test(Feedback.of(ctx.getSource())));
    }
 
    private static int openMenu(MinecraftClient client) {
@@ -136,8 +122,21 @@ public class MeshifyClient implements ClientModInitializer {
       return 1;
    }
 
-   private static int export(CommandContext<FabricClientCommandSource> ctx, String name, String options) {
-      return result(MeshifyActions.export(Feedback.of(ctx.getSource()), name, options));
+   private static int export(CommandContext<FabricClientCommandSource> ctx, String name, String rawOptions) {
+      return commandResult(MeshifyActions.export(Feedback.of(ctx.getSource()), name, rawOptions));
+   }
+
+   /** {@code <literal>} sets the corner where the player stands, {@code <literal> x y z} sets it there. */
+   private static LiteralArgumentBuilder<FabricClientCommandSource> cornerCommand(String literal, Corner corner) {
+      return ClientCommandManager.literal(literal)
+         .executes(ctx -> setCorner(ctx.getSource(), corner, ctx.getSource().getPlayer().getBlockPos()))
+         .then(
+            ClientCommandManager.argument("x", IntegerArgumentType.integer())
+               .then(
+                  ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer()).executes(ctx -> setCorner(ctx.getSource(), corner, positionFromArguments(ctx))))
+               )
+         );
    }
 
    /** {@code <blocks> [side]}, shared by expand ({@code sign} 1) and shrink ({@code sign} -1). */
@@ -153,7 +152,7 @@ public class MeshifyClient implements ClientModInitializer {
 
    private static int resize(CommandContext<FabricClientCommandSource> ctx, int sign, String side) {
       int blocks = sign * IntegerArgumentType.getInteger(ctx, "blocks");
-      return result(MeshifyActions.resize(Feedback.of(ctx.getSource()), blocks, side));
+      return commandResult(MeshifyActions.resize(Feedback.of(ctx.getSource()), blocks, side));
    }
 
    private static CompletableFuture<Suggestions> suggestMatching(List<String> candidates, SuggestionsBuilder builder) {
@@ -175,21 +174,20 @@ public class MeshifyClient implements ClientModInitializer {
       String partial = lastWord.getRemaining().toLowerCase(Locale.ROOT);
       String alreadyTyped = lastSpace < 0 ? "" : typed.substring(0, lastSpace).toLowerCase(Locale.ROOT);
 
-      for (MeshifyClient.Option option : OPTIONS) {
-         if (option.token().startsWith(partial) && (alreadyTyped.isEmpty() || !(" " + alreadyTyped + " ").contains(" " + option.token() + " "))) {
-            lastWord.suggest(option.token(), option.description());
+      for (OptionSuggestion suggestion : OPTION_SUGGESTIONS) {
+         if (suggestion.token().startsWith(partial) && (alreadyTyped.isEmpty() || !(" " + alreadyTyped + " ").contains(" " + suggestion.token() + " "))) {
+            lastWord.suggest(suggestion.token(), suggestion.description());
          }
       }
 
       return lastWord.buildFuture();
    }
 
-   private static BlockPos posFromArgs(CommandContext<FabricClientCommandSource> ctx) {
+   private static BlockPos positionFromArguments(CommandContext<FabricClientCommandSource> ctx) {
       return new BlockPos(IntegerArgumentType.getInteger(ctx, "x"), IntegerArgumentType.getInteger(ctx, "y"), IntegerArgumentType.getInteger(ctx, "z"));
    }
 
-   private static int setPos(FabricClientCommandSource source, Corner corner, BlockPos explicit) {
-      BlockPos pos = explicit != null ? explicit : source.getPlayer().getBlockPos();
+   private static int setCorner(FabricClientCommandSource source, Corner corner, BlockPos pos) {
       MeshifyActions.setCorner(Feedback.of(source), corner, pos);
       if (Selection.isComplete()) {
          source.sendFeedback(Text.translatable("meshify.msg.hint"));
@@ -198,9 +196,9 @@ public class MeshifyClient implements ClientModInitializer {
       return 1;
    }
 
-   private record Option(String token, String descKey, Object descArg) {
+   private record OptionSuggestion(String token, String descriptionKey, Object descriptionArgument) {
       Text description() {
-         return this.descArg == null ? Text.translatable(this.descKey) : Text.translatable(this.descKey, this.descArg);
+         return this.descriptionArgument == null ? Text.translatable(this.descriptionKey) : Text.translatable(this.descriptionKey, this.descriptionArgument);
       }
    }
 }

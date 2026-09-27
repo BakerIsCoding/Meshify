@@ -2,7 +2,8 @@ package com.norwood.meshify.export.special;
 
 import com.mojang.blaze3d.vertex.VertexFormat.DrawMode;
 import com.norwood.meshify.export.MeshBuilder;
-import com.norwood.meshify.export.TexKey;
+import com.norwood.meshify.export.RegionExporter;
+import com.norwood.meshify.export.TextureKey;
 import com.norwood.meshify.mixin.RenderLayerAccessor;
 import com.norwood.meshify.mixin.RenderSetupAccessor;
 import com.norwood.meshify.mixin.SpriteAtlasTextureAccessor;
@@ -55,17 +56,19 @@ import org.joml.Vector3f;
 import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
+/** Stands in for the game's render queue, so block-entity and entity renderers draw into the mesh instead. */
 final class CaptureQueue implements OrderedRenderCommandQueue {
+   private static final int MAP_SIZE = 128;
    private final MeshBuilder mesh;
-   private final MinecraftClient mc;
+   private final MinecraftClient client;
    private final List<String> warnings;
    private final Map<Identifier, Map<Identifier, Sprite>> atlasCache = new HashMap<>();
-   int captured;
-   Integer contextMapId;
+   int capturedQuads;
+   Integer itemFrameMapId;
 
-   CaptureQueue(MeshBuilder mesh, MinecraftClient mc, List<String> warnings) {
+   CaptureQueue(MeshBuilder mesh, MinecraftClient client, List<String> warnings) {
       this.mesh = mesh;
-      this.mc = mc;
+      this.client = client;
       this.warnings = warnings;
    }
 
@@ -74,177 +77,166 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       return this;
    }
 
-   private CaptureQueue.CapturingConsumer consumer(RenderLayer layer, Sprite sprite, int tint) {
-      String s = ((RenderLayerAccessor)layer).meshify$getName().toLowerCase(Locale.ROOT);
-      if (!s.contains("glint") && !s.contains("outline") && !s.contains("crumbling") && !s.contains("shadow")) {
-         int i = normTint(tint);
-         CaptureQueue.QuadResolver capturequeue$quadresolver;
-         if (sprite != null) {
-            TexKey texkey = TexKey.sprite(sprite, i);
-            capturequeue$quadresolver = uv -> texkey;
-         } else {
-            Identifier identifier = textureOf(layer);
-            if (identifier == null) {
-               this.warnOnce("BER/entity layer without resolvable texture skipped: " + s);
-               return null;
-            }
-
-            CaptureQueue.QuadResolver capturequeue$quadresolver1 = this.tryMapResolver(identifier);
-            if (capturequeue$quadresolver1 != null) {
-               capturequeue$quadresolver = capturequeue$quadresolver1;
-            } else if (identifier.getPath().startsWith("textures/atlas/")) {
-               capturequeue$quadresolver = uv -> this.resolveAtlas(identifier, uv, i);
-            } else {
-               TexKey texkey1 = i < 0
-                  ? TexKey.resource(identifier)
-                  : TexKey.composite(
-                     TexKey.sanitize(identifier.getPath().replaceAll("^textures/|\\.png$", "")) + String.format(Locale.ROOT, "_t%06x", i),
-                     List.of(new TexKey.CompositeLayer(identifier, i))
-                  );
-               capturequeue$quadresolver = uv -> texkey1;
-            }
-         }
-
-         boolean flag = layer.getDrawMode() == DrawMode.TRIANGLES;
-         return new CaptureQueue.CapturingConsumer(this, capturequeue$quadresolver, flag);
-      } else {
+   /** A consumer that turns the layer's vertices into quads, or null for overlay layers that are not geometry. */
+   private CaptureQueue.CapturingConsumer capturingConsumer(RenderLayer layer, Sprite sprite, int tint) {
+      String name = ((RenderLayerAccessor)layer).meshify$getName().toLowerCase(Locale.ROOT);
+      if (name.contains("glint") || name.contains("outline") || name.contains("crumbling") || name.contains("shadow")) {
          return null;
       }
-   }
 
-   private TexKey resolveAtlas(Identifier atlasId, float[][] uv, int tint) {
-      Map<Identifier, Sprite> map = this.atlasCache.computeIfAbsent(atlasId, id -> {
-         if (this.mc.getTextureManager().getTexture(id) instanceof SpriteAtlasTexture spriteatlastexture) {
-            Map<Identifier, Sprite> map1 = ((SpriteAtlasTextureAccessor)spriteatlastexture).meshify$getSprites();
-            return map1 != null ? map1 : Map.of();
-         } else {
-            return Map.of();
-         }
-      });
-      if (map.isEmpty()) {
-         this.warnOnce("atlas not resolvable, quads skipped: " + atlasId);
-         return null;
+      int rgb = normalizeRendererTint(tint);
+      CaptureQueue.QuadResolver resolver;
+      if (sprite != null) {
+         TextureKey texture = TextureKey.sprite(sprite, rgb);
+         resolver = uv -> texture;
       } else {
-         float f = (uv[0][0] + uv[1][0] + uv[2][0] + uv[3][0]) / 4.0F;
-         float f1 = (uv[0][1] + uv[1][1] + uv[2][1] + uv[3][1]) / 4.0F;
-
-         for (Sprite sprite : map.values()) {
-            if (f >= sprite.getMinU() && f <= sprite.getMaxU() && f1 >= sprite.getMinV() && f1 <= sprite.getMaxV()) {
-               float f2 = sprite.getMaxU() - sprite.getMinU();
-               float f3 = sprite.getMaxV() - sprite.getMinV();
-
-               for (float[] afloat : uv) {
-                  afloat[0] = f2 > 0.0F ? clamp01((afloat[0] - sprite.getMinU()) / f2) : 0.0F;
-                  afloat[1] = f3 > 0.0F ? clamp01((afloat[1] - sprite.getMinV()) / f3) : 0.0F;
-               }
-
-               return TexKey.sprite(sprite, tint);
-            }
-         }
-
-         this.warnOnce("no sprite found for UVs on " + atlasId);
-         return null;
-      }
-   }
-
-   private CaptureQueue.QuadResolver tryMapResolver(Identifier texId) {
-      String s = texId.getPath();
-      boolean flag = s.startsWith("map/");
-      boolean flag1 = s.contains("map_atlas");
-      if (!flag && !flag1) {
-         return null;
-      } else {
-         int i = -1;
-         if (flag) {
-            try {
-               i = Integer.parseInt(s.replaceAll("[^0-9]", ""));
-            } catch (NumberFormatException numberformatexception) {
-            }
-         }
-
-         if (i < 0 && this.contextMapId != null) {
-            i = this.contextMapId;
-         }
-
-         if (i >= 0 && this.mc.world != null) {
-            MapState mapstate = this.mc.world.getMapState(new MapIdComponent(i));
-            if (mapstate == null) {
-               this.warnOnce("map state not available: map id " + i);
-               return null;
-            } else {
-               byte[] abyte = (byte[])mapstate.colors.clone();
-               TexKey texkey = TexKey.generated("map_" + i, client -> {
-                  NativeImage nativeimage = new NativeImage(128, 128, false);
-
-                  for (int j = 0; j < 16384; j++) {
-                     nativeimage.setColorArgb(j & 127, j >> 7, MapColor.getRenderColor(abyte[j] & 255));
-                  }
-
-                  return nativeimage;
-               });
-               return uv -> {
-                  for (int j = 0; j < 2; j++) {
-                     float f = Float.MAX_VALUE;
-                     float f1 = -Float.MAX_VALUE;
-
-                     for (float[] afloat : uv) {
-                        f = Math.min(f, afloat[j]);
-                        f1 = Math.max(f1, afloat[j]);
-                     }
-
-                     float f2 = f1 - f;
-
-                     for (float[] afloat1 : uv) {
-                        afloat1[j] = f2 > 1.0E-6F ? (afloat1[j] - f) / f2 : 0.0F;
-                     }
-                  }
-
-                  return texkey;
-               };
-            }
-         } else {
-            this.warnOnce("map texture without resolvable map id skipped: " + texId);
+         Identifier textureId = textureOf(layer);
+         if (textureId == null) {
+            this.warnOnce("BER/entity layer without resolvable texture skipped: " + name);
             return null;
          }
+
+         CaptureQueue.QuadResolver mapResolver = this.tryMapResolver(textureId);
+         if (mapResolver != null) {
+            resolver = mapResolver;
+         } else if (textureId.getPath().startsWith("textures/atlas/")) {
+            resolver = uv -> this.resolveAtlas(textureId, uv, rgb);
+         } else {
+            TextureKey texture = TextureKey.resource(textureId, rgb);
+            resolver = uv -> texture;
+         }
       }
+
+      return new CaptureQueue.CapturingConsumer(this, resolver, layer.getDrawMode() == DrawMode.TRIANGLES);
    }
 
-   private static float clamp01(float f) {
-      return f < 0.0F ? 0.0F : (f > 1.0F ? 1.0F : f);
-   }
+   /** Finds the sprite an atlas quad samples by the centre of its UVs, and restates the UVs within that sprite. */
+   private TextureKey resolveAtlas(Identifier atlasId, float[][] uv, int tint) {
+      Map<Identifier, Sprite> sprites = this.atlasCache.computeIfAbsent(atlasId, id -> {
+         if (this.client.getTextureManager().getTexture(id) instanceof SpriteAtlasTexture atlas) {
+            Map<Identifier, Sprite> all = ((SpriteAtlasTextureAccessor)atlas).meshify$getSprites();
+            return all != null ? all : Map.of();
+         }
 
-   private static int normTint(int argb) {
-      if (argb != 0 && argb != -1) {
-         int i = argb & 16777215;
-         return i == 16777215 ? -1 : i;
-      } else {
-         return -1;
+         return Map.of();
+      });
+      if (sprites.isEmpty()) {
+         this.warnOnce("atlas not resolvable, quads skipped: " + atlasId);
+         return null;
       }
+
+      float centreU = (uv[0][0] + uv[1][0] + uv[2][0] + uv[3][0]) / 4.0F;
+      float centreV = (uv[0][1] + uv[1][1] + uv[2][1] + uv[3][1]) / 4.0F;
+
+      for (Sprite sprite : sprites.values()) {
+         if (centreU >= sprite.getMinU() && centreU <= sprite.getMaxU() && centreV >= sprite.getMinV() && centreV <= sprite.getMaxV()) {
+            for (int k = 0; k < uv.length; k++) {
+               uv[k] = TextureKey.spriteUv(sprite, uv[k][0], uv[k][1]);
+            }
+
+            return TextureKey.sprite(sprite, tint);
+         }
+      }
+
+      this.warnOnce("no sprite found for UVs on " + atlasId);
+      return null;
    }
 
-   private void warnOnce(String msg) {
-      if (!this.warnings.contains(msg)) {
-         this.warnings.add(msg);
+   /** Maps are drawn from their pixel data, found by the id in the texture name or else the item frame holding them. */
+   private CaptureQueue.QuadResolver tryMapResolver(Identifier textureId) {
+      String path = textureId.getPath();
+      boolean mapTexture = path.startsWith("map/");
+      if (!mapTexture && !path.contains("map_atlas")) {
+         return null;
+      }
+
+      int mapId = -1;
+      if (mapTexture) {
+         try {
+            mapId = Integer.parseInt(path.replaceAll("[^0-9]", ""));
+         } catch (NumberFormatException ignored) {
+            // No digits in the name: fall back to the item frame's map.
+         }
+      }
+
+      if (mapId < 0 && this.itemFrameMapId != null) {
+         mapId = this.itemFrameMapId;
+      }
+
+      if (mapId < 0 || this.client.world == null) {
+         this.warnOnce("map texture without resolvable map id skipped: " + textureId);
+         return null;
+      }
+
+      MapState state = this.client.world.getMapState(new MapIdComponent(mapId));
+      if (state == null) {
+         this.warnOnce("map state not available: map id " + mapId);
+         return null;
+      }
+
+      byte[] colors = state.colors.clone();
+      TextureKey texture = TextureKey.generated("map_" + mapId, client -> {
+         NativeImage image = new NativeImage(MAP_SIZE, MAP_SIZE, false);
+
+         for (int i = 0; i < MAP_SIZE * MAP_SIZE; i++) {
+            image.setColorArgb(i % MAP_SIZE, i / MAP_SIZE, MapColor.getRenderColor(colors[i] & 0xFF));
+         }
+
+         return image;
+      });
+      // The map fills the whole quad, whichever part of the map atlas its UVs pointed at.
+      return uv -> {
+         for (int axis = 0; axis < 2; axis++) {
+            float min = Float.MAX_VALUE;
+            float max = -Float.MAX_VALUE;
+
+            for (float[] corner : uv) {
+               min = Math.min(min, corner[axis]);
+               max = Math.max(max, corner[axis]);
+            }
+
+            float span = max - min;
+
+            for (float[] corner : uv) {
+               corner[axis] = span > 1.0E-6F ? (corner[axis] - min) / span : 0.0F;
+            }
+         }
+
+         return texture;
+      };
+   }
+
+   /** Renderers pass 0 as well as white for an uncoloured layer. */
+   private static int normalizeRendererTint(int argb) {
+      return argb == 0 ? -1 : TextureKey.normalizeTint(argb);
+   }
+
+   private void warnOnce(String message) {
+      if (!this.warnings.contains(message)) {
+         this.warnings.add(message);
       }
    }
 
    private static Identifier textureOf(RenderLayer layer) {
       try {
-         RenderSetup rendersetup = ((RenderLayerAccessor)layer).meshify$getRenderSetup();
-         Map<?, ?> map = ((RenderSetupAccessor)(Object)rendersetup).meshify$getTextures();
+         RenderSetup setup = ((RenderLayerAccessor)layer).meshify$getRenderSetup();
+         Map<?, ?> textures = ((RenderSetupAccessor)(Object)setup).meshify$getTextures();
 
-         for (Object object : map.values()) {
-            if (object instanceof TextureSpecAccessor texturespecaccessor) {
-               Identifier identifier = texturespecaccessor.meshify$getLocation();
-               if (identifier != null) {
-                  return identifier;
-               }
+         for (Object texture : textures.values()) {
+            if (texture instanceof TextureSpecAccessor spec && spec.meshify$getLocation() != null) {
+               return spec.meshify$getLocation();
             }
          }
-      } catch (Exception exception) {
+      } catch (Exception ignored) {
+         // A layer built some other way; the caller warns and skips it.
       }
 
       return null;
+   }
+
+   private void capture(TextureKey texture, float[][] positions, float[][] uv, float[] normal) {
+      this.mesh.addQuad(texture, positions, uv, normal);
+      this.capturedQuads++;
    }
 
    @Override
@@ -259,12 +251,12 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       boolean hasGlint,
       int tintedColor,
       CrumblingOverlayCommand crumblingOverlay,
-      int i2
+      int outlineColor
    ) {
-      CaptureQueue.CapturingConsumer capturequeue$capturingconsumer = this.consumer(renderLayer, sprite, tintedColor);
-      if (capturequeue$capturingconsumer != null) {
-         part.render(matrices, capturequeue$capturingconsumer, light, overlay);
-         capturequeue$capturingconsumer.finish();
+      CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, sprite, tintedColor);
+      if (consumer != null) {
+         part.render(matrices, consumer, light, overlay);
+         consumer.finish();
       }
    }
 
@@ -281,11 +273,11 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       int outlineColor,
       CrumblingOverlayCommand crumblingOverlay
    ) {
-      CaptureQueue.CapturingConsumer capturequeue$capturingconsumer = this.consumer(renderLayer, sprite, tintedColor);
-      if (capturequeue$capturingconsumer != null) {
+      CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, sprite, tintedColor);
+      if (consumer != null) {
          model.setAngles(state);
-         model.render(matrices, capturequeue$capturingconsumer, light, overlay);
-         capturequeue$capturingconsumer.finish();
+         model.render(matrices, consumer, light, overlay);
+         consumer.finish();
       }
    }
 
@@ -293,23 +285,21 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
    public void submitBlockStateModel(
       MatrixStack matrices, RenderLayer renderLayer, BlockStateModel model, float r, float g, float b, int light, int overlay, int outlineColor
    ) {
-      int i = (int)(r * 255.0F) << 16 | (int)(g * 255.0F) << 8 | (int)(b * 255.0F);
-      this.emitBakedModel(matrices, model, i);
+      int rgb = (int)(r * 255.0F) << 16 | (int)(g * 255.0F) << 8 | (int)(b * 255.0F);
+      this.emitBakedModel(matrices, model, rgb);
    }
 
    @Override
    public void submitBlock(MatrixStack matrices, BlockState state, int light, int overlay, int outlineColor) {
-      BlockStateModel blockstatemodel = this.mc.getBlockRenderManager().getModels().getModel(state);
-      this.emitBakedModel(matrices, blockstatemodel, 16777215);
+      this.emitBakedModel(matrices, this.client.getBlockRenderManager().getModels().getModel(state), -1);
    }
 
    private void emitBakedModel(MatrixStack matrices, BlockStateModel model, int tint) {
-      for (BlockModelPart blockmodelpart : model.getParts(Random.create(42L))) {
-         for (int i = -1; i < 6; i++) {
-            Direction direction = i < 0 ? null : Direction.values()[i];
-
-            for (BakedQuad bakedquad : blockmodelpart.getQuads(direction)) {
-               this.emitBakedQuad(matrices, bakedquad, tint);
+      // A fixed seed, so a model with random variants comes out the same every export.
+      for (BlockModelPart part : model.getParts(Random.create(42L))) {
+         for (Direction face : RegionExporter.QUAD_FACES) {
+            for (BakedQuad quad : part.getQuads(face)) {
+               this.emitBakedQuad(matrices, quad, tint);
             }
          }
       }
@@ -327,56 +317,44 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       RenderLayer renderLayer,
       Glint glintType
    ) {
-      for (BakedQuad bakedquad : quads) {
-         int i = 16777215;
-         if (bakedquad.tintIndex() >= 0 && tintLayers != null && bakedquad.tintIndex() < tintLayers.length) {
-            i = tintLayers[bakedquad.tintIndex()] & 16777215;
-         }
-
-         this.emitBakedQuad(matrices, bakedquad, i);
+      for (BakedQuad quad : quads) {
+         int layer = quad.tintIndex();
+         this.emitBakedQuad(matrices, quad, layer >= 0 && tintLayers != null && layer < tintLayers.length ? tintLayers[layer] : -1);
       }
    }
 
    private void emitBakedQuad(MatrixStack matrices, BakedQuad quad, int tint) {
       Sprite sprite = quad.sprite();
-      if (sprite != null) {
-         Matrix4f matrix4f = matrices.peek().getPositionMatrix();
-         float f = sprite.getMinU();
-         float f1 = sprite.getMaxU();
-         float f2 = sprite.getMinV();
-         float f3 = sprite.getMaxV();
-         float f4 = f1 - f;
-         float f5 = f3 - f2;
-         float[][] afloat = new float[4][3];
-         float[][] afloat1 = new float[4][2];
-         Vector4f vector4f = new Vector4f();
-
-         for (int i = 0; i < 4; i++) {
-            Vector3fc vector3fc = quad.getPosition(i);
-            vector4f.set(vector3fc.x(), vector3fc.y(), vector3fc.z(), 1.0F);
-            matrix4f.transform(vector4f);
-            afloat[i][0] = vector4f.x();
-            afloat[i][1] = vector4f.y();
-            afloat[i][2] = vector4f.z();
-            long j = quad.getTexcoords(i);
-            float f6 = Vector2f.getX(j);
-            float f7 = Vector2f.getY(j);
-            afloat1[i][0] = f4 > 0.0F ? clamp01((f6 - f) / f4) : 0.0F;
-            afloat1[i][1] = f5 > 0.0F ? clamp01((f7 - f2) / f5) : 0.0F;
-         }
-
-         Vector3f vector3f = matrices.peek().transformNormal(quad.face().getFloatVector(), new Vector3f());
-         this.mesh.addQuad(TexKey.sprite(sprite, tint == 16777215 ? -1 : tint), afloat, afloat1, new float[]{vector3f.x(), vector3f.y(), vector3f.z()});
-         this.captured++;
+      if (sprite == null) {
+         return;
       }
+
+      Matrix4f matrix = matrices.peek().getPositionMatrix();
+      float[][] positions = new float[4][3];
+      float[][] uv = new float[4][];
+      Vector4f vertex = new Vector4f();
+
+      for (int k = 0; k < 4; k++) {
+         Vector3fc local = quad.getPosition(k);
+         vertex.set(local.x(), local.y(), local.z(), 1.0F);
+         matrix.transform(vertex);
+         positions[k][0] = vertex.x();
+         positions[k][1] = vertex.y();
+         positions[k][2] = vertex.z();
+         long texcoords = quad.getTexcoords(k);
+         uv[k] = TextureKey.spriteUv(sprite, Vector2f.getX(texcoords), Vector2f.getY(texcoords));
+      }
+
+      Vector3f normal = matrices.peek().transformNormal(quad.face().getFloatVector(), new Vector3f());
+      this.capture(TextureKey.sprite(sprite, tint), positions, uv, new float[]{normal.x(), normal.y(), normal.z()});
    }
 
    @Override
    public void submitCustom(MatrixStack matrices, RenderLayer renderLayer, Custom customRenderer) {
-      CaptureQueue.CapturingConsumer capturequeue$capturingconsumer = this.consumer(renderLayer, null, -1);
-      if (capturequeue$capturingconsumer != null) {
-         customRenderer.render(matrices.peek(), capturequeue$capturingconsumer);
-         capturequeue$capturingconsumer.finish();
+      CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, null, -1);
+      if (consumer != null) {
+         customRenderer.render(matrices.peek(), consumer);
+         consumer.finish();
       }
    }
 
@@ -430,11 +408,17 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
    }
 
    private static final class CapturingConsumer implements VertexConsumer {
+      /** Per vertex: x, y, z, u, v, the normal's x, y, z, then 1 once a normal was given. */
+      private static final int U = 3;
+      private static final int V = 4;
+      private static final int NORMAL = 5;
+      private static final int HAS_NORMAL = 8;
+      private static final int VERTEX_SIZE = 9;
       private final CaptureQueue owner;
       private final CaptureQueue.QuadResolver resolver;
       private final int groupSize;
-      private final ArrayList<float[]> verts = new ArrayList<>();
-      private float[] current;
+      private final ArrayList<float[]> vertices = new ArrayList<>();
+      private float[] currentVertex;
 
       CapturingConsumer(CaptureQueue owner, CaptureQueue.QuadResolver resolver, boolean triangles) {
          this.owner = owner;
@@ -445,22 +429,25 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       @Override
       public VertexConsumer vertex(float x, float y, float z) {
          this.flushVertex();
-         this.current = new float[]{x, y, z, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+         this.currentVertex = new float[VERTEX_SIZE];
+         this.currentVertex[0] = x;
+         this.currentVertex[1] = y;
+         this.currentVertex[2] = z;
          return this;
       }
 
       private void flushVertex() {
-         if (this.current != null) {
-            this.verts.add(this.current);
-            this.current = null;
+         if (this.currentVertex != null) {
+            this.vertices.add(this.currentVertex);
+            this.currentVertex = null;
          }
       }
 
       @Override
       public VertexConsumer texture(float u, float v) {
-         if (this.current != null) {
-            this.current[3] = u;
-            this.current[4] = v;
+         if (this.currentVertex != null) {
+            this.currentVertex[U] = u;
+            this.currentVertex[V] = v;
          }
 
          return this;
@@ -468,11 +455,11 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
 
       @Override
       public VertexConsumer normal(float x, float y, float z) {
-         if (this.current != null) {
-            this.current[5] = x;
-            this.current[6] = y;
-            this.current[7] = z;
-            this.current[8] = 1.0F;
+         if (this.currentVertex != null) {
+            this.currentVertex[NORMAL] = x;
+            this.currentVertex[NORMAL + 1] = y;
+            this.currentVertex[NORMAL + 2] = z;
+            this.currentVertex[HAS_NORMAL] = 1.0F;
          }
 
          return this;
@@ -503,56 +490,39 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          return this;
       }
 
+      /** Groups the vertices into quads; a triangle repeats its last corner to make one. */
       void finish() {
          this.flushVertex();
 
-         for (int i = 0; i + this.groupSize <= this.verts.size(); i += this.groupSize) {
-            float[][] afloat = new float[4][3];
-            float[][] afloat1 = new float[4][2];
-            float[] afloat2 = null;
+         for (int first = 0; first + this.groupSize <= this.vertices.size(); first += this.groupSize) {
+            float[][] positions = new float[4][3];
+            float[][] uv = new float[4][2];
+            float[] normal = null;
 
-            for (int j = 0; j < 4; j++) {
-               float[] afloat3 = this.verts.get(i + Math.min(j, this.groupSize - 1));
-               afloat[j][0] = afloat3[0];
-               afloat[j][1] = afloat3[1];
-               afloat[j][2] = afloat3[2];
-               afloat1[j][0] = afloat3[3];
-               afloat1[j][1] = afloat3[4];
-               if (afloat2 == null && afloat3[8] != 0.0F) {
-                  afloat2 = new float[]{afloat3[5], afloat3[6], afloat3[7]};
+            for (int k = 0; k < 4; k++) {
+               float[] vertex = this.vertices.get(first + Math.min(k, this.groupSize - 1));
+               positions[k][0] = vertex[0];
+               positions[k][1] = vertex[1];
+               positions[k][2] = vertex[2];
+               uv[k][0] = vertex[U];
+               uv[k][1] = vertex[V];
+               if (normal == null && vertex[HAS_NORMAL] != 0.0F) {
+                  normal = new float[]{vertex[NORMAL], vertex[NORMAL + 1], vertex[NORMAL + 2]};
                }
             }
 
-            TexKey texkey = this.resolver.resolve(afloat1);
-            if (texkey != null) {
-               if (afloat2 == null) {
-                  afloat2 = computeNormal(afloat);
-               }
-
-               this.owner.mesh.addQuad(texkey, afloat, afloat1, afloat2);
-               this.owner.captured++;
+            TextureKey texture = this.resolver.resolve(uv);
+            if (texture != null) {
+               this.owner.capture(texture, positions, uv, normal != null ? normal : MeshBuilder.faceNormal(positions));
             }
          }
 
-         this.verts.clear();
-      }
-
-      private static float[] computeNormal(float[][] p) {
-         float f = p[1][0] - p[0][0];
-         float f1 = p[1][1] - p[0][1];
-         float f2 = p[1][2] - p[0][2];
-         float f3 = p[2][0] - p[0][0];
-         float f4 = p[2][1] - p[0][1];
-         float f5 = p[2][2] - p[0][2];
-         float f6 = f1 * f5 - f2 * f4;
-         float f7 = f2 * f3 - f * f5;
-         float f8 = f * f4 - f1 * f3;
-         float f9 = (float)Math.sqrt(f6 * f6 + f7 * f7 + f8 * f8);
-         return f9 < 1.0E-8F ? new float[]{0.0F, 1.0F, 0.0F} : new float[]{f6 / f9, f7 / f9, f8 / f9};
+         this.vertices.clear();
       }
    }
 
    private interface QuadResolver {
-      TexKey resolve(float[][] var1);
+      /** The texture for a quad, or null to drop it; may rewrite {@code uv} into that texture's space. */
+      TextureKey resolve(float[][] uv);
    }
 }

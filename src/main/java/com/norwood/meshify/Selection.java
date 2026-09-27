@@ -19,7 +19,7 @@ public final class Selection {
    public static RegistryKey<World> dimension;
    public static String lastOptions = "";
 
-   private static Path file;
+   private static Path sessionFile;
 
    private Selection() {
    }
@@ -46,14 +46,14 @@ public final class Selection {
       save();
    }
 
-   public static void set(Corner corner, BlockPos pos, RegistryKey<World> world) {
+   public static void set(Corner corner, BlockPos pos, RegistryKey<World> worldKey) {
       // Corners from different dimensions describe nothing, so the stale one is dropped.
-      if (dimension != null && !dimension.equals(world)) {
+      if (dimension != null && !dimension.equals(worldKey)) {
          start = null;
          end = null;
       }
 
-      dimension = world;
+      dimension = worldKey;
       if (corner == Corner.START) {
          start = pos;
       } else {
@@ -63,8 +63,8 @@ public final class Selection {
       save();
    }
 
-   public static boolean matches(RegistryKey<World> world) {
-      return dimension == null || dimension.equals(world);
+   public static boolean matchesDimension(RegistryKey<World> worldKey) {
+      return dimension == null || dimension.equals(worldKey);
    }
 
    public static BlockPos min() {
@@ -75,39 +75,49 @@ public final class Selection {
       return new BlockPos(Math.max(start.getX(), end.getX()), Math.max(start.getY(), end.getY()), Math.max(start.getZ(), end.getZ()));
    }
 
+   /** The region's size in blocks along X, Y and Z. */
+   private static BlockPos size() {
+      return max().subtract(min()).add(1, 1, 1);
+   }
+
    /** The region's size along X, Y and Z, e.g. {@code 32×18×40}. */
-   public static String dimensions() {
-      BlockPos size = max().subtract(min()).add(1, 1, 1);
+   public static String describeSize() {
+      BlockPos size = size();
       return size.getX() + "×" + size.getY() + "×" + size.getZ();
    }
 
+   /** Stops at Long.MAX_VALUE, so coordinates typed in the billions cannot wrap around under the size limit. */
    public static long volume() {
       if (!isComplete()) {
          return 0L;
-      } else {
-         long i = Math.abs(end.getX() - start.getX()) + 1L;
-         long j = Math.abs(end.getY() - start.getY()) + 1L;
-         long k = Math.abs(end.getZ() - start.getZ()) + 1L;
-         return i * j * k;
+      }
+
+      BlockPos min = min();
+      BlockPos max = max();
+      try {
+         long area = Math.multiplyExact((long)max.getX() - min.getX() + 1, (long)max.getY() - min.getY() + 1);
+         return Math.multiplyExact(area, (long)max.getZ() - min.getZ() + 1);
+      } catch (ArithmeticException overflow) {
+         return Long.MAX_VALUE;
       }
    }
 
-   /** Grows the region by {@code n} blocks on all six sides; a negative {@code n} shrinks it. */
-   public static void expand(int n) {
-      BlockPos blockpos = min();
-      BlockPos blockpos1 = max();
-      int[] aint = axis(blockpos.getX(), blockpos1.getX(), n);
-      int[] aint1 = axis(blockpos.getY(), blockpos1.getY(), n);
-      int[] aint2 = axis(blockpos.getZ(), blockpos1.getZ(), n);
-      setBounds(new BlockPos(aint[0], aint1[0], aint2[0]), new BlockPos(aint[1], aint1[1], aint2[1]));
+   /** Grows the region by {@code blocks} on all six sides; a negative count shrinks it. */
+   public static void expand(int blocks) {
+      BlockPos lo = min();
+      BlockPos hi = max();
+      int[] x = growRange(lo.getX(), hi.getX(), blocks);
+      int[] y = growRange(lo.getY(), hi.getY(), blocks);
+      int[] z = growRange(lo.getZ(), hi.getZ(), blocks);
+      setBounds(new BlockPos(x[0], y[0], z[0]), new BlockPos(x[1], y[1], z[1]));
    }
 
    /** Moves only the {@code side} face; shrinking stops at the opposite face so it never turns inside out. */
-   public static void expand(int n, Direction side) {
+   public static void expand(int blocks, Direction side) {
       BlockPos lo = min();
       BlockPos hi = max();
       Direction.Axis axis = side.getAxis();
-      int shift = Math.max(n, lo.getComponentAlongAxis(axis) - hi.getComponentAlongAxis(axis));
+      int shift = Math.max(blocks, lo.getComponentAlongAxis(axis) - hi.getComponentAlongAxis(axis));
       if (side.getDirection() == Direction.AxisDirection.POSITIVE) {
          setBounds(lo, hi.offset(side, shift));
       } else {
@@ -116,15 +126,15 @@ public final class Selection {
    }
 
    /** Shrinking past the middle would flip the axis, so it collapses to a single block instead. */
-   private static int[] axis(int lo, int hi, int n) {
-      int i = lo - n;
-      int j = hi + n;
-      if (i > j) {
-         int k = (lo + hi) / 2;
-         return new int[]{k, k};
-      } else {
-         return new int[]{i, j};
+   private static int[] growRange(int lo, int hi, int blocks) {
+      int grownLo = lo - blocks;
+      int grownHi = hi + blocks;
+      if (grownLo > grownHi) {
+         int middle = (lo + hi) / 2;
+         return new int[]{middle, middle};
       }
+
+      return new int[]{grownLo, grownHi};
    }
 
    public static void expandVertical(int bottomY, int topY) {
@@ -143,76 +153,75 @@ public final class Selection {
    }
 
    /** Keeps the selection across restarts in a Properties file: five fields need no JSON. */
-   public static void init(Path dir) {
-      file = dir.resolve("session.properties");
-      if (Files.exists(file)) {
-         Properties properties = new Properties();
+   public static void loadSession(Path exportRoot) {
+      sessionFile = exportRoot.resolve("session.properties");
+      if (!Files.exists(sessionFile)) {
+         return;
+      }
 
-         try (InputStream inputstream = Files.newInputStream(file)) {
-            properties.load(inputstream);
-         } catch (IOException ioexception) {
-            return;
-         }
+      Properties properties = new Properties();
+      try (InputStream in = Files.newInputStream(sessionFile)) {
+         properties.load(in);
+      } catch (IOException unreadable) {
+         // Start with no selection rather than a half-read one.
+         return;
+      }
 
-         start = readPos(properties, "start");
-         end = readPos(properties, "end");
-         lastOptions = properties.getProperty("options", "");
-         String s = properties.getProperty("dimension", "");
-         if (!s.isEmpty()) {
-            Identifier identifier = Identifier.tryParse(s);
-            if (identifier != null) {
-               dimension = RegistryKey.of(RegistryKeys.WORLD, identifier);
-            }
-         }
+      start = readPos(properties, "start");
+      end = readPos(properties, "end");
+      lastOptions = properties.getProperty("options", "");
+      String dimensionName = properties.getProperty("dimension", "");
+      Identifier dimensionId = dimensionName.isEmpty() ? null : Identifier.tryParse(dimensionName);
+      if (dimensionId != null) {
+         dimension = RegistryKey.of(RegistryKeys.WORLD, dimensionId);
       }
    }
 
    private static void save() {
-      if (file != null) {
-         Properties properties = new Properties();
-         writePos(properties, "start", start);
-         writePos(properties, "end", end);
-         properties.setProperty("options", lastOptions);
-         if (dimension != null) {
-            properties.setProperty("dimension", dimension.getValue().toString());
-         }
+      if (sessionFile == null) {
+         return;
+      }
 
-         try {
-            Files.createDirectories(file.getParent());
+      Properties properties = new Properties();
+      writePos(properties, "start", start);
+      writePos(properties, "end", end);
+      properties.setProperty("options", lastOptions);
+      if (dimension != null) {
+         properties.setProperty("dimension", dimension.getValue().toString());
+      }
 
-            try (OutputStream outputstream = Files.newOutputStream(file)) {
-               properties.store(outputstream, "meshify selection");
-            }
-         } catch (IOException ioexception) {
+      try {
+         Files.createDirectories(sessionFile.getParent());
+
+         try (OutputStream out = Files.newOutputStream(sessionFile)) {
+            properties.store(out, "meshify selection");
          }
+      } catch (IOException ignored) {
+         // Only the next session's convenience is lost; the selection in memory is intact.
       }
    }
 
-   private static BlockPos readPos(Properties props, String prefix) {
-      String s = props.getProperty(prefix);
-      if (s == null) {
+   private static BlockPos readPos(Properties properties, String key) {
+      String value = properties.getProperty(key);
+      String[] parts = value == null ? new String[0] : value.split(",");
+      if (parts.length != 3) {
          return null;
-      } else {
-         String[] astring = s.split(",");
-         if (astring.length != 3) {
-            return null;
-         } else {
-            try {
-               return new BlockPos(Integer.parseInt(astring[0]), Integer.parseInt(astring[1]), Integer.parseInt(astring[2]));
-            } catch (NumberFormatException numberformatexception) {
-               return null;
-            }
-         }
+      }
+
+      try {
+         return new BlockPos(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+      } catch (NumberFormatException malformed) {
+         return null;
       }
    }
 
-   private static void writePos(Properties props, String prefix, BlockPos pos) {
+   private static void writePos(Properties properties, String key, BlockPos pos) {
       if (pos != null) {
-         props.setProperty(prefix, pos.getX() + "," + pos.getY() + "," + pos.getZ());
+         properties.setProperty(key, pos.getX() + "," + pos.getY() + "," + pos.getZ());
       }
    }
 
-   /** Self-check, run with {@code gradlew selectionCheck}; never calls {@link #init}, so it writes no file. */
+   /** Self-check, run with {@code gradlew selectionCheck}; never calls {@link #loadSession}, so it writes no file. */
    public static void main(String[] args) {
       start = new BlockPos(0, 0, 0);
       end = new BlockPos(9, 4, 9);
@@ -224,13 +233,20 @@ public final class Selection {
       check(min().getZ() == 9 && max().getZ() == 9, "shrinking stops at the opposite face");
       expand(-100, Direction.DOWN);
       check(min().getY() == 7 && max().getY() == 7, "shrinking from below stops at the top face");
-      check(dimensions().equals("8×1×1"), "dimensions reads X×Y×Z");
+      check(describeSize().equals("8×1×1"), "dimensions reads X×Y×Z");
+      check(volume() == 8L, "volume multiplies the sides");
+      start = new BlockPos(-2_000_000_000, 0, 0);
+      end = new BlockPos(2_000_000_000, 0, 0);
+      check(volume() == 4_000_000_001L, "a side wider than an int still counts right");
+      start = new BlockPos(-2_000_000_000, -2_000_000_000, -2_000_000_000);
+      end = new BlockPos(2_000_000_000, 2_000_000_000, 2_000_000_000);
+      check(volume() == Long.MAX_VALUE, "a volume past a long saturates instead of wrapping");
       System.out.println("Selection self-check passed");
    }
 
-   private static void check(boolean ok, String what) {
-      if (!ok) {
-         throw new AssertionError("Selection self-check failed: " + what);
+   private static void check(boolean passed, String description) {
+      if (!passed) {
+         throw new AssertionError("Selection self-check failed: " + description);
       }
    }
 }

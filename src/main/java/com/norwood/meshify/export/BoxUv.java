@@ -1,17 +1,23 @@
 package com.norwood.meshify.export;
 
+import java.util.Arrays;
+import java.util.function.DoubleUnaryOperator;
 import net.minecraft.util.math.Direction;
 
+/** Entity-model cuboids and quads, in model pixels (16 to a block), turned about the block's vertical centre line. */
 public final class BoxUv {
+   private static final double PIXELS_PER_BLOCK = 16.0;
+   private static final double PIVOT = PIXELS_PER_BLOCK / 2;
+
    private BoxUv() {
    }
 
    public static void emit(
       MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
+      TextureKey texture,
+      double blockX,
+      double blockY,
+      double blockZ,
       double x0,
       double y0,
       double z0,
@@ -20,22 +26,21 @@ public final class BoxUv {
       double z1,
       int u0,
       int v0,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
+      int textureWidth,
+      int textureHeight,
+      double yawDegrees,
       double inflate
    ) {
-      emit(mesh, tex, bx, by, bz, x0, y0, z0, x1, y1, z1, u0, v0, texW, texH, yawDeg, pivotX, pivotZ, inflate, false);
+      emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, u0, v0, textureWidth, textureHeight, yawDegrees, inflate, false);
    }
 
+   /** Takes the unwrap size from the cuboid itself. */
    public static void emit(
       MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
+      TextureKey texture,
+      double blockX,
+      double blockY,
+      double blockZ,
       double x0,
       double y0,
       double z0,
@@ -44,20 +49,18 @@ public final class BoxUv {
       double z1,
       int u0,
       int v0,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
+      int textureWidth,
+      int textureHeight,
+      double yawDegrees,
       double inflate,
       boolean upright
    ) {
       emit(
          mesh,
-         tex,
-         bx,
-         by,
-         bz,
+         texture,
+         blockX,
+         blockY,
+         blockZ,
          x0,
          y0,
          z0,
@@ -69,23 +72,25 @@ public final class BoxUv {
          (int)Math.round(x1 - x0),
          (int)Math.round(y1 - y0),
          (int)Math.round(z1 - z0),
-         texW,
-         texH,
-         yawDeg,
-         pivotX,
-         pivotZ,
+         textureWidth,
+         textureHeight,
+         yawDegrees,
          inflate,
          Direction.UP,
          upright
       );
    }
 
+   /**
+    * Most block-entity renderers turn the model 180° about Z; pass {@code upright} for ones that don't, like the chest.
+    * {@code sx}, {@code sy} and {@code sz} size the texture unwrap, which scaled models draw smaller than the cuboid.
+    */
    public static void emit(
       MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
+      TextureKey texture,
+      double blockX,
+      double blockY,
+      double blockZ,
       double x0,
       double y0,
       double z0,
@@ -97,120 +102,63 @@ public final class BoxUv {
       int sx,
       int sy,
       int sz,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
-      double inflate
-   ) {
-      emit(mesh, tex, bx, by, bz, x0, y0, z0, x1, y1, z1, u0, v0, sx, sy, sz, texW, texH, yawDeg, pivotX, pivotZ, inflate, Direction.UP);
-   }
-
-   public static void emit(
-      MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
-      double x0,
-      double y0,
-      double z0,
-      double x1,
-      double y1,
-      double z1,
-      int u0,
-      int v0,
-      int sx,
-      int sy,
-      int sz,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
-      double inflate,
-      Direction up
-   ) {
-      emit(mesh, tex, bx, by, bz, x0, y0, z0, x1, y1, z1, u0, v0, sx, sy, sz, texW, texH, yawDeg, pivotX, pivotZ, inflate, up, false);
-   }
-
-   /** Most block-entity renderers turn the model 180° about Z; pass {@code upright} for ones that don't, like the chest. */
-   public static void emit(
-      MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
-      double x0,
-      double y0,
-      double z0,
-      double x1,
-      double y1,
-      double z1,
-      int u0,
-      int v0,
-      int sx,
-      int sy,
-      int sz,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
+      int textureWidth,
+      int textureHeight,
+      double yawDegrees,
       double inflate,
       Direction up,
       boolean upright
    ) {
-      double d0 = x0 - inflate;
-      double d1 = y0 - inflate;
-      double d2 = z0 - inflate;
-      double d3 = x1 + inflate;
-      double d4 = y1 + inflate;
-      double d5 = z1 + inflate;
-      float[][] afloat = uv(texW, texH, u0 + sz, v0 + sz + sy, u0 + sz + sx, v0 + sz + sy, u0 + sz + sx, v0 + sz, u0 + sz, v0 + sz);
-      float[][] afloat1 = uv(
-         texW, texH, u0 + 2 * sz + sx, v0 + sz + sy, u0 + 2 * sz + 2 * sx, v0 + sz + sy, u0 + 2 * sz + 2 * sx, v0 + sz, u0 + 2 * sz + sx, v0 + sz
+      double minX = x0 - inflate;
+      double minY = y0 - inflate;
+      double minZ = z0 - inflate;
+      double maxX = x1 + inflate;
+      double maxY = y1 + inflate;
+      double maxZ = z1 + inflate;
+      // The standard cuboid unwrap: top and bottom in the first row, the four sides below them.
+      float[][] north = normalizedUv(textureWidth, textureHeight, u0 + sz, v0 + sz + sy, u0 + sz + sx, v0 + sz + sy, u0 + sz + sx, v0 + sz, u0 + sz, v0 + sz);
+      float[][] south = normalizedUv(
+         textureWidth, textureHeight, u0 + 2 * sz + sx, v0 + sz + sy, u0 + 2 * sz + 2 * sx, v0 + sz + sy, u0 + 2 * sz + 2 * sx, v0 + sz, u0 + 2 * sz + sx, v0 + sz
       );
-      float[][] afloat2 = uv(texW, texH, u0, v0 + sz + sy, u0 + sz, v0 + sz + sy, u0 + sz, v0 + sz, u0, v0 + sz);
-      float[][] afloat3 = uv(texW, texH, u0 + sz + sx, v0 + sz + sy, u0 + 2 * sz + sx, v0 + sz + sy, u0 + 2 * sz + sx, v0 + sz, u0 + sz + sx, v0 + sz);
-      float[][] afloat4 = uv(texW, texH, u0 + sz + sx, v0, u0 + sz, v0, u0 + sz, v0 + sz, u0 + sz + sx, v0 + sz);
-      float[][] afloat5 = uv(texW, texH, u0 + sz + sx, v0, u0 + sz + 2 * sx, v0, u0 + sz + 2 * sx, v0 + sz, u0 + sz + sx, v0 + sz);
+      float[][] east = normalizedUv(textureWidth, textureHeight, u0, v0 + sz + sy, u0 + sz, v0 + sz + sy, u0 + sz, v0 + sz, u0, v0 + sz);
+      float[][] west = normalizedUv(textureWidth, textureHeight, u0 + sz + sx, v0 + sz + sy, u0 + 2 * sz + sx, v0 + sz + sy, u0 + 2 * sz + sx, v0 + sz, u0 + sz + sx, v0 + sz);
+      float[][] top = normalizedUv(textureWidth, textureHeight, u0 + sz + sx, v0, u0 + sz, v0, u0 + sz, v0 + sz, u0 + sz + sx, v0 + sz);
+      float[][] bottom = normalizedUv(textureWidth, textureHeight, u0 + sz + sx, v0, u0 + sz + 2 * sx, v0, u0 + sz + 2 * sx, v0 + sz, u0 + sz + sx, v0 + sz);
       if (upright) {
          // The 180° turn keeps every face on its side of the box, so only the sheet lookup changes.
-         afloat = rotate180(afloat);
-         afloat1 = rotate180(afloat1);
-         float[][] afloat6 = afloat2;
-         afloat2 = rotate180(afloat3);
-         afloat3 = rotate180(afloat6);
-         afloat6 = afloat4;
-         afloat4 = afloat5;
-         afloat5 = afloat6;
+         north = rotate180(north);
+         south = rotate180(south);
+         float[][] oldEast = east;
+         east = rotate180(west);
+         west = rotate180(oldEast);
+         float[][] oldTop = top;
+         top = bottom;
+         bottom = oldTop;
       }
 
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d3, d1, d2}, {d0, d1, d2}, {d0, d4, d2}, {d3, d4, d2}}, afloat, new float[]{0.0F, 0.0F, -1.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{maxX, minY, minZ}, {minX, minY, minZ}, {minX, maxY, minZ}, {maxX, maxY, minZ}}, north, new float[]{0.0F, 0.0F, -1.0F}
       );
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d0, d1, d5}, {d3, d1, d5}, {d3, d4, d5}, {d0, d4, d5}}, afloat1, new float[]{0.0F, 0.0F, 1.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{minX, minY, maxZ}, {maxX, minY, maxZ}, {maxX, maxY, maxZ}, {minX, maxY, maxZ}}, south, new float[]{0.0F, 0.0F, 1.0F}
       );
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d3, d1, d5}, {d3, d1, d2}, {d3, d4, d2}, {d3, d4, d5}}, afloat2, new float[]{1.0F, 0.0F, 0.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{maxX, minY, maxZ}, {maxX, minY, minZ}, {maxX, maxY, minZ}, {maxX, maxY, maxZ}}, east, new float[]{1.0F, 0.0F, 0.0F}
       );
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d0, d1, d2}, {d0, d1, d5}, {d0, d4, d5}, {d0, d4, d2}}, afloat3, new float[]{-1.0F, 0.0F, 0.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{minX, minY, minZ}, {minX, minY, maxZ}, {minX, maxY, maxZ}, {minX, maxY, minZ}}, west, new float[]{-1.0F, 0.0F, 0.0F}
       );
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d0, d4, d5}, {d3, d4, d5}, {d3, d4, d2}, {d0, d4, d2}}, afloat4, new float[]{0.0F, 1.0F, 0.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{minX, maxY, maxZ}, {maxX, maxY, maxZ}, {maxX, maxY, minZ}, {minX, maxY, minZ}}, top, new float[]{0.0F, 1.0F, 0.0F}
       );
-      face(
-         mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, up,
-         new double[][]{{d3, d1, d5}, {d0, d1, d5}, {d0, d1, d2}, {d3, d1, d2}}, afloat5, new float[]{0.0F, -1.0F, 0.0F}
+      emitFace(
+         mesh, texture, blockX, blockY, blockZ, yawDegrees, up,
+         new double[][]{{maxX, minY, maxZ}, {minX, minY, maxZ}, {minX, minY, minZ}, {maxX, minY, minZ}}, bottom, new float[]{0.0F, -1.0F, 0.0F}
       );
    }
 
@@ -230,31 +178,31 @@ public final class BoxUv {
       check(uSpan(true, -1.0F, 0.0F, 0.0F), new float[]{0.0F, 14.0F}, "upright west face");
       // The depth faces keep their column either way; only the corner order turns over.
       check(uSpan(true, 0.0F, 0.0F, -1.0F), new float[]{14.0F, 29.0F}, "upright north face");
-      float[] afloat = firstCorner(box(true));
-      float[] afloat1 = firstCorner(box(false));
-      check(afloat[0] != afloat1[0] || afloat[1] != afloat1[1], "upright turns the north face over");
+      float[] uprightCorner = firstCorner(box(true));
+      float[] defaultCorner = firstCorner(box(false));
+      check(uprightCorner[0] != defaultCorner[0] || uprightCorner[1] != defaultCorner[1], "upright turns the north face over");
       System.out.println("BoxUv self-check passed");
    }
 
    private static MeshBuilder box(boolean upright) {
-      MeshBuilder meshbuilder = new MeshBuilder();
-      emit(meshbuilder, TexKey.generated("t", mc -> null), 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 16.0, 10.0, 15.0, 0, 19, 64, 64, 0.0, 8.0, 8.0, 0.0, upright);
-      return meshbuilder;
+      MeshBuilder mesh = new MeshBuilder();
+      emit(mesh, TextureKey.generated("t", client -> null), 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 16.0, 10.0, 15.0, 0, 19, 64, 64, 0.0, 0.0, upright);
+      return mesh;
    }
 
    private static float[] uSpan(boolean upright, float nx, float ny, float nz) {
-      for (MeshBuilder.Quad meshbuilder$quad : box(upright).quads().values().iterator().next()) {
-         float[] afloat = meshbuilder$quad.normal();
-         if (afloat[0] == nx && afloat[1] == ny && afloat[2] == nz) {
-            float f = Float.MAX_VALUE;
-            float f1 = -Float.MAX_VALUE;
+      for (MeshBuilder.Quad quad : box(upright).quads().values().iterator().next()) {
+         float[] normal = quad.normal();
+         if (normal[0] == nx && normal[1] == ny && normal[2] == nz) {
+            float min = Float.MAX_VALUE;
+            float max = -Float.MAX_VALUE;
 
-            for (float[] afloat1 : meshbuilder$quad.uv()) {
-               f = Math.min(f, afloat1[0] * 64.0F);
-               f1 = Math.max(f1, afloat1[0] * 64.0F);
+            for (float[] uv : quad.uv()) {
+               min = Math.min(min, uv[0] * 64.0F);
+               max = Math.max(max, uv[0] * 64.0F);
             }
 
-            return new float[]{f, f1};
+            return new float[]{min, max};
          }
       }
 
@@ -265,139 +213,72 @@ public final class BoxUv {
       return mesh.quads().values().iterator().next().get(0).uv()[0];
    }
 
-   private static void check(float[] got, float[] want, String what) {
-      if (!java.util.Arrays.equals(got, want)) {
-         throw new AssertionError(
-            "BoxUv self-check failed: " + what + " (got " + java.util.Arrays.toString(got) + ", want " + java.util.Arrays.toString(want) + ")"
-         );
+   private static void check(float[] actual, float[] expected, String description) {
+      if (!Arrays.equals(actual, expected)) {
+         throw new AssertionError("BoxUv self-check failed: " + description + " (got " + Arrays.toString(actual) + ", want " + Arrays.toString(expected) + ")");
       }
    }
 
-   private static void check(boolean ok, String what) {
-      if (!ok) {
-         throw new AssertionError("BoxUv self-check failed: " + what);
+   private static void check(boolean passed, String description) {
+      if (!passed) {
+         throw new AssertionError("BoxUv self-check failed: " + description);
       }
    }
 
-   private static float[][] uv(int texW, int texH, double... uvPx) {
-      float[][] afloat = new float[4][2];
+   private static float[][] normalizedUv(int textureWidth, int textureHeight, double... uvPx) {
+      float[][] uv = new float[4][2];
 
-      for (int i = 0; i < 4; i++) {
-         afloat[i][0] = (float)(uvPx[i * 2] / texW);
-         afloat[i][1] = (float)(uvPx[i * 2 + 1] / texH);
+      for (int k = 0; k < 4; k++) {
+         uv[k][0] = (float)(uvPx[k * 2] / textureWidth);
+         uv[k][1] = (float)(uvPx[k * 2 + 1] / textureHeight);
       }
 
-      return afloat;
+      return uv;
    }
 
    public static void rotatedQuad(
-      MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
-      double[][] cornersPx,
-      double[][] uvPx,
-      int texW,
-      int texH,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
-      float[] normal
+      MeshBuilder mesh, TextureKey texture, double blockX, double blockY, double blockZ, double[][] cornersPx, double[][] uvPx, int textureWidth, int textureHeight, double yawDegrees, float[] normal
    ) {
-      float[][] afloat = new float[4][2];
+      float[][] uv = new float[4][2];
 
-      for (int i = 0; i < 4; i++) {
-         afloat[i][0] = (float)(uvPx[i][0] / texW);
-         afloat[i][1] = (float)(uvPx[i][1] / texH);
+      for (int k = 0; k < 4; k++) {
+         uv[k][0] = (float)(uvPx[k][0] / textureWidth);
+         uv[k][1] = (float)(uvPx[k][1] / textureHeight);
       }
 
-      face(mesh, tex, bx, by, bz, yawDeg, pivotX, pivotZ, Direction.UP, cornersPx, afloat, normal);
+      emitFace(mesh, texture, blockX, blockY, blockZ, yawDegrees, Direction.UP, cornersPx, uv, normal);
    }
 
-   private static void face(
-      MeshBuilder mesh,
-      TexKey tex,
-      double bx,
-      double by,
-      double bz,
-      double yawDeg,
-      double pivotX,
-      double pivotZ,
-      Direction up,
-      double[][] cornersPx,
-      float[][] uv,
-      float[] normal
+   private static void emitFace(
+      MeshBuilder mesh, TextureKey texture, double blockX, double blockY, double blockZ, double yawDegrees, Direction up, double[][] cornersPx, float[][] uv, float[] normal
    ) {
-      double d0 = Math.toRadians(yawDeg);
-      double d1 = Math.cos(d0);
-      double d2 = Math.sin(d0);
-      float[][] afloat = new float[4][3];
+      double yaw = Math.toRadians(yawDegrees);
+      double cos = Math.cos(yaw);
+      double sin = Math.sin(yaw);
+      float[][] positions = new float[4][3];
 
-      for (int i = 0; i < 4; i++) {
-         double d3 = cornersPx[i][0] - pivotX;
-         double d5 = cornersPx[i][2] - pivotZ;
-         double d7 = d3 * d1 - d5 * d2 + pivotX;
-         double d9 = cornersPx[i][1];
-         double d11 = d3 * d2 + d5 * d1 + pivotZ;
-         double d13 = d7;
-         double d14 = d9;
-         double d15 = d11;
-         switch (up) {
-            case DOWN:
-               d14 = 16.0 - d9;
-               d15 = 16.0 - d11;
-               break;
-            case NORTH:
-               d14 = d11;
-               d15 = 16.0 - d9;
-               break;
-            case SOUTH:
-               d14 = 16.0 - d11;
-               d15 = d9;
-               break;
-            case EAST:
-               d13 = d9;
-               d14 = 16.0 - d7;
-               break;
-            case WEST:
-               d13 = 16.0 - d9;
-               d14 = d7;
-         }
-
-         afloat[i][0] = (float)(bx + d13 / 16.0);
-         afloat[i][1] = (float)(by + d14 / 16.0);
-         afloat[i][2] = (float)(bz + d15 / 16.0);
+      for (int k = 0; k < 4; k++) {
+         double dx = cornersPx[k][0] - PIVOT;
+         double dz = cornersPx[k][2] - PIVOT;
+         double[] rotated = reorient(up, dx * cos - dz * sin + PIVOT, cornersPx[k][1], dx * sin + dz * cos + PIVOT, v -> PIXELS_PER_BLOCK - v);
+         positions[k][0] = (float)(blockX + rotated[0] / PIXELS_PER_BLOCK);
+         positions[k][1] = (float)(blockY + rotated[1] / PIXELS_PER_BLOCK);
+         positions[k][2] = (float)(blockZ + rotated[2] / PIXELS_PER_BLOCK);
       }
 
-      double d16 = normal[0] * d1 - normal[2] * d2;
-      double d4 = normal[1];
-      double d6 = normal[0] * d2 + normal[2] * d1;
-      double d8 = d16;
-      double d10 = d4;
-      double d12 = d6;
-      switch (up) {
-         case DOWN:
-            d10 = -d4;
-            d12 = -d6;
-            break;
-         case NORTH:
-            d10 = d6;
-            d12 = -d4;
-            break;
-         case SOUTH:
-            d10 = -d6;
-            d12 = d4;
-            break;
-         case EAST:
-            d8 = d4;
-            d10 = -d16;
-            break;
-         case WEST:
-            d8 = -d4;
-            d10 = d16;
-      }
+      double[] rotatedNormal = reorient(up, normal[0] * cos - normal[2] * sin, normal[1], normal[0] * sin + normal[2] * cos, v -> -v);
+      mesh.addQuad(texture, positions, uv, new float[]{(float)rotatedNormal[0], (float)rotatedNormal[1], (float)rotatedNormal[2]});
+   }
 
-      mesh.addQuad(tex, afloat, uv, new float[]{(float)d8, (float)d10, (float)d12});
+   /** Tips a point or direction over so the model's top faces {@code up}; {@code flip} mirrors one coordinate across the block. */
+   private static double[] reorient(Direction up, double x, double y, double z, DoubleUnaryOperator flip) {
+      return switch (up) {
+         case UP -> new double[]{x, y, z};
+         case DOWN -> new double[]{x, flip.applyAsDouble(y), flip.applyAsDouble(z)};
+         case NORTH -> new double[]{x, z, flip.applyAsDouble(y)};
+         case SOUTH -> new double[]{x, flip.applyAsDouble(z), y};
+         case EAST -> new double[]{y, flip.applyAsDouble(x), z};
+         case WEST -> new double[]{flip.applyAsDouble(y), x, z};
+      };
    }
 }

@@ -12,28 +12,30 @@ import java.util.Set;
 import java.util.Map.Entry;
 
 public final class MeshBuilder {
-   private static final float WELD = 9.765625E-4F;
+   /** Welding snaps every vertex to a grid of 1/1024 block. */
+   private static final int WELD_GRID = 1024;
+   private static final float WELD_STEP = 1.0F / WELD_GRID;
    private static final double DEGENERATE_AREA = 1.0E-8;
-   private final Map<String, TexKey> keys = new LinkedHashMap<>();
+   private final Map<String, TextureKey> textures = new LinkedHashMap<>();
    private final Map<String, List<MeshBuilder.Quad>> quads = new LinkedHashMap<>();
-   private final Set<String> emissive = new LinkedHashSet<>();
+   private final Set<String> emissiveTextureIds = new LinkedHashSet<>();
 
-   public void addQuad(TexKey key, float[][] pos, float[][] uv, float[] normal) {
-      this.keys.putIfAbsent(key.id(), key);
-      this.quads.computeIfAbsent(key.id(), k -> new ArrayList<>()).add(new MeshBuilder.Quad(pos, uv, normal));
+   public void addQuad(TextureKey texture, float[][] positions, float[][] uv, float[] normal) {
+      this.textures.putIfAbsent(texture.id(), texture);
+      this.quads.computeIfAbsent(texture.id(), k -> new ArrayList<>()).add(new MeshBuilder.Quad(positions, uv, normal));
    }
 
    /** Flags a texture as belonging to a light-emitting block, so it is not darkened by face shading. */
-   public void markEmissive(String keyId) {
-      this.emissive.add(keyId);
+   public void markEmissive(String textureId) {
+      this.emissiveTextureIds.add(textureId);
    }
 
-   public Set<String> emissiveKeys() {
-      return this.emissive;
+   public Set<String> emissiveTextureIds() {
+      return this.emissiveTextureIds;
    }
 
-   public Map<String, TexKey> keys() {
-      return this.keys;
+   public Map<String, TextureKey> textures() {
+      return this.textures;
    }
 
    public Map<String, List<MeshBuilder.Quad>> quads() {
@@ -41,97 +43,112 @@ public final class MeshBuilder {
    }
 
    public int faceCount() {
-      int i = 0;
+      int count = 0;
 
       for (List<MeshBuilder.Quad> list : this.quads.values()) {
-         i += list.size();
+         count += list.size();
       }
 
-      return i;
+      return count;
    }
 
-   public MeshBuilder.OptStats optimize() {
-      int i = 0;
-      int j = 0;
+   public MeshBuilder.OptimizationStats optimize() {
+      int degenerate = 0;
+      int duplicate = 0;
       Iterator<Entry<String, List<MeshBuilder.Quad>>> iterator = this.quads.entrySet().iterator();
 
       while (iterator.hasNext()) {
          Entry<String, List<MeshBuilder.Quad>> entry = iterator.next();
          List<MeshBuilder.Quad> list = entry.getValue();
-         List<MeshBuilder.Quad> list1 = new ArrayList<>(list.size());
-         Set<String> set = new HashSet<>(list.size() * 2);
+         List<MeshBuilder.Quad> kept = new ArrayList<>(list.size());
+         Set<String> seen = new HashSet<>(list.size() * 2);
 
-         for (MeshBuilder.Quad meshbuilder$quad : list) {
-            snap(meshbuilder$quad.pos());
-            if (area(meshbuilder$quad.pos()) < 1.0E-8) {
-               i++;
-            } else if (!set.add(signature(meshbuilder$quad))) {
-               j++;
+         for (MeshBuilder.Quad quad : list) {
+            snap(quad.positions());
+            if (quadArea(quad.positions()) < DEGENERATE_AREA) {
+               degenerate++;
+            } else if (!seen.add(signature(quad))) {
+               duplicate++;
             } else {
-               list1.add(meshbuilder$quad);
+               kept.add(quad);
             }
          }
 
-         if (list1.isEmpty()) {
+         if (kept.isEmpty()) {
             iterator.remove();
-            this.keys.remove(entry.getKey());
+            this.textures.remove(entry.getKey());
          } else {
-            entry.setValue(list1);
+            entry.setValue(kept);
          }
       }
 
-      return new MeshBuilder.OptStats(1024, i, j);
+      return new MeshBuilder.OptimizationStats(WELD_GRID, degenerate, duplicate);
    }
 
-   private static void snap(float[][] pos) {
-      for (float[] afloat : pos) {
-         afloat[0] = Math.round(afloat[0] / 9.765625E-4F) * 9.765625E-4F;
-         afloat[1] = Math.round(afloat[1] / 9.765625E-4F) * 9.765625E-4F;
-         afloat[2] = Math.round(afloat[2] / 9.765625E-4F) * 9.765625E-4F;
+   /** Unit normal of the plane through a face's first three corners; straight up when they are collinear. */
+   public static float[] faceNormal(float[][] corners) {
+      float ax = corners[1][0] - corners[0][0];
+      float ay = corners[1][1] - corners[0][1];
+      float az = corners[1][2] - corners[0][2];
+      float bx = corners[2][0] - corners[0][0];
+      float by = corners[2][1] - corners[0][1];
+      float bz = corners[2][2] - corners[0][2];
+      float nx = ay * bz - az * by;
+      float ny = az * bx - ax * bz;
+      float nz = ax * by - ay * bx;
+      float length = (float)Math.sqrt(nx * nx + ny * ny + nz * nz);
+      return length < 1.0E-8F ? new float[]{0.0F, 1.0F, 0.0F} : new float[]{nx / length, ny / length, nz / length};
+   }
+
+   private static void snap(float[][] positions) {
+      for (float[] corner : positions) {
+         for (int axis = 0; axis < 3; axis++) {
+            corner[axis] = Math.round(corner[axis] / WELD_STEP) * WELD_STEP;
+         }
       }
    }
 
-   private static double area(float[][] p) {
-      return triArea(p[0], p[1], p[2]) + triArea(p[0], p[2], p[3]);
+   private static double quadArea(float[][] corners) {
+      return triangleArea(corners[0], corners[1], corners[2]) + triangleArea(corners[0], corners[2], corners[3]);
    }
 
-   private static double triArea(float[] a, float[] b, float[] c) {
-      double d0 = b[0] - a[0];
-      double d1 = b[1] - a[1];
-      double d2 = b[2] - a[2];
-      double d3 = c[0] - a[0];
-      double d4 = c[1] - a[1];
-      double d5 = c[2] - a[2];
-      double d6 = d1 * d5 - d2 * d4;
-      double d7 = d2 * d3 - d0 * d5;
-      double d8 = d0 * d4 - d1 * d3;
-      return 0.5 * Math.sqrt(d6 * d6 + d7 * d7 + d8 * d8);
+   private static double triangleArea(float[] a, float[] b, float[] c) {
+      double abX = b[0] - a[0];
+      double abY = b[1] - a[1];
+      double abZ = b[2] - a[2];
+      double acX = c[0] - a[0];
+      double acY = c[1] - a[1];
+      double acZ = c[2] - a[2];
+      double crossX = abY * acZ - abZ * acY;
+      double crossY = abZ * acX - abX * acZ;
+      double crossZ = abX * acY - abY * acX;
+      return 0.5 * Math.sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
    }
 
-   private static String signature(MeshBuilder.Quad q) {
-      StringBuilder stringbuilder = new StringBuilder(96);
+   private static String signature(MeshBuilder.Quad quad) {
+      StringBuilder signature = new StringBuilder(96);
 
-      for (float[] afloat : q.pos()) {
-         stringbuilder.append(Math.round(afloat[0] / 9.765625E-4F))
+      for (float[] corner : quad.positions()) {
+         signature.append(Math.round(corner[0] / WELD_STEP))
             .append(',')
-            .append(Math.round(afloat[1] / 9.765625E-4F))
+            .append(Math.round(corner[1] / WELD_STEP))
             .append(',')
-            .append(Math.round(afloat[2] / 9.765625E-4F))
+            .append(Math.round(corner[2] / WELD_STEP))
             .append(';');
       }
 
-      for (float[] afloat2 : q.uv()) {
-         stringbuilder.append(String.format(Locale.ROOT, "%.4f/%.4f;", afloat2[0], afloat2[1]));
+      for (float[] uv : quad.uv()) {
+         signature.append(String.format(Locale.ROOT, "%.4f/%.4f;", uv[0], uv[1]));
       }
 
-      float[] afloat1 = q.normal();
-      stringbuilder.append(Math.round(afloat1[0])).append(',').append(Math.round(afloat1[1])).append(',').append(Math.round(afloat1[2]));
-      return stringbuilder.toString();
+      float[] normal = quad.normal();
+      signature.append(Math.round(normal[0])).append(',').append(Math.round(normal[1])).append(',').append(Math.round(normal[2]));
+      return signature.toString();
    }
 
-   public record OptStats(int weldGrid, int degenerateRemoved, int duplicateRemoved) {
+   public record OptimizationStats(int weldGrid, int degenerateRemoved, int duplicateRemoved) {
    }
 
-   public record Quad(float[][] pos, float[][] uv, float[] normal) {
+   public record Quad(float[][] positions, float[][] uv, float[] normal) {
    }
 }

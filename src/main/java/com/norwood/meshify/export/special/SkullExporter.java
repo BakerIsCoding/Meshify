@@ -7,7 +7,7 @@ import com.mojang.authlib.properties.Property;
 import com.norwood.meshify.export.BoxUv;
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.ObjTemplate;
-import com.norwood.meshify.export.TexKey;
+import com.norwood.meshify.export.TextureKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -22,7 +22,6 @@ import net.minecraft.component.type.ProfileComponent;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.world.BlockRenderView;
 
 public final class SkullExporter {
@@ -30,142 +29,99 @@ public final class SkullExporter {
    }
 
    public static boolean export(
-      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractSkullBlock block, double bx, double by, double bz, List<String> warnings
+      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractSkullBlock block, double blockX, double blockY, double blockZ, List<String> warnings
    ) {
-      SkullType skulltype = block.getSkullType();
-      if (skulltype == Type.DRAGON) {
-         return exportDragon(mesh, state, pos, bx, by, bz, warnings);
-      } else {
-         int i = 64;
-         boolean flag = false;
-         boolean flag1 = false;
-         String s;
-         if (skulltype == Type.SKELETON) {
-            s = "textures/entity/skeleton/skeleton.png";
-            i = 32;
-         } else if (skulltype == Type.WITHER_SKELETON) {
-            s = "textures/entity/skeleton/wither_skeleton.png";
-            i = 32;
-         } else if (skulltype == Type.CREEPER) {
-            s = "textures/entity/creeper/creeper.png";
-            i = 32;
-         } else if (skulltype == Type.ZOMBIE) {
-            s = "textures/entity/zombie/zombie.png";
-         } else if (skulltype == Type.PIGLIN) {
-            s = "textures/entity/piglin/piglin.png";
-            flag1 = true;
-         } else {
-            if (skulltype != Type.PLAYER) {
-               warnings.add("unsupported head type skipped: " + skulltype + " @ " + pos.toShortString());
-               return false;
-            }
-
-            s = "textures/entity/player/wide/steve.png";
-            flag = true;
-         }
-
-         TexKey texkey;
-         if (skulltype == Type.PLAYER) {
-            String s1 = resolveSkinUrl(world, pos);
-            texkey = s1 != null ? TexKey.playerSkin(s1) : TexKey.resource(Identifier.of("minecraft", s));
-         } else {
-            texkey = TexKey.resource(Identifier.of("minecraft", s));
-         }
-
-         boolean flag2 = !state.contains(SkullBlock.ROTATION);
-         double d0 = flag1 ? 5.0 : 4.0;
-         double d1 = 8.0 - d0;
-         double d2 = 8.0 + d0;
-         double d3;
-         double d4;
-         double d5;
-         double d6;
-         double d7;
-         if (flag2) {
-            Direction direction = state.get(Properties.HORIZONTAL_FACING);
-
-            d3 = switch (direction) {
-               case EAST -> 90.0;
-               case SOUTH -> 180.0;
-               case WEST -> 270.0;
-               default -> 0.0;
-            };
-            d4 = 4.0;
-            d5 = 12.0;
-            d6 = 8.0;
-            d7 = 16.0;
-         } else {
-            d3 = 180.0 + state.get(SkullBlock.ROTATION).intValue() * 22.5;
-            d4 = 0.0;
-            d5 = 8.0;
-            d6 = 4.0;
-            d7 = 12.0;
-         }
-
-         BoxUv.emit(mesh, texkey, bx, by, bz, d1, d4, d6, d2, d5, d7, 0, 0, 64, i, d3, 8.0, 8.0, 0.0);
-         if (flag) {
-            BoxUv.emit(mesh, texkey, bx, by, bz, d1, d4, d6, d2, d5, d7, 32, 0, 64, i, d3, 8.0, 8.0, 0.25);
-         }
-
-         return true;
+      SkullType type = block.getSkullType();
+      Head head = headFor(type);
+      // Checked before the state is read: a modded head may have neither ROTATION nor HORIZONTAL_FACING.
+      if (head == null && type != Type.DRAGON) {
+         warnings.add("unsupported head type skipped: " + type + " @ " + pos.toShortString());
+         return false;
       }
+
+      boolean wall = !state.contains(SkullBlock.ROTATION);
+      double yaw = wall ? Yaw.of(state.get(Properties.HORIZONTAL_FACING)) : Yaw.ofRotation(state);
+      if (type == Type.DRAGON) {
+         return exportDragon(mesh, pos, blockX, blockY, blockZ, yaw, wall, warnings);
+      }
+
+      Identifier fallback = Identifier.ofVanilla("textures/entity/" + head.texture() + ".png");
+      String skinUrl = type == Type.PLAYER ? resolveSkinUrl(world, pos) : null;
+      TextureKey texture = skinUrl != null ? TextureKey.playerSkin(skinUrl) : TextureKey.resource(fallback);
+      double x0 = 8.0 - head.halfWidth();
+      double x1 = 8.0 + head.halfWidth();
+      // A wall head sits halfway up, against the wall; a floor head stands on the block's centre.
+      double y0 = wall ? 4.0 : 0.0;
+      double y1 = wall ? 12.0 : 8.0;
+      double z0 = wall ? 8.0 : 4.0;
+      double z1 = wall ? 16.0 : 12.0;
+      BoxUv.emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, 0, 0, 64, head.textureHeight(), yaw, 0.0);
+      if (type == Type.PLAYER) {
+         // The hat layer, a quarter pixel proud of the head.
+         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, 32, 0, 64, head.textureHeight(), yaw, 0.25);
+      }
+
+      return true;
    }
 
-   private static boolean exportDragon(MeshBuilder mesh, BlockState state, BlockPos pos, double bx, double by, double bz, List<String> warnings) {
-      boolean flag = !state.contains(SkullBlock.ROTATION);
-      double d0;
-      if (flag) {
-         d0 = switch ((Direction)state.get(Properties.HORIZONTAL_FACING)) {
-            case EAST -> 90.0;
-            case SOUTH -> 180.0;
-            case WEST -> 270.0;
-            default -> 0.0;
-         };
-      } else {
-         d0 = 180.0 + state.get(SkullBlock.ROTATION).intValue() * 22.5;
+   /** The head's entity texture, under {@code textures/entity/}; null for heads this cuboid can't draw. */
+   private static Head headFor(SkullType type) {
+      if (!(type instanceof Type vanilla)) {
+         return null;
       }
 
+      return switch (vanilla) {
+         case SKELETON -> new Head("skeleton/skeleton", 32, 4.0);
+         case WITHER_SKELETON -> new Head("skeleton/wither_skeleton", 32, 4.0);
+         case CREEPER -> new Head("creeper/creeper", 32, 4.0);
+         case ZOMBIE -> new Head("zombie/zombie", 64, 4.0);
+         case PIGLIN -> new Head("piglin/piglin", 64, 5.0);
+         case PLAYER -> new Head("player/wide/steve", 64, 4.0);
+         case DRAGON -> null;
+      };
+   }
+
+   private static boolean exportDragon(MeshBuilder mesh, BlockPos pos, double blockX, double blockY, double blockZ, double yaw, boolean wall, List<String> warnings) {
       try {
-         ObjTemplate objtemplate = ObjTemplate.get(flag ? "dragon_wall_head.obj" : "dragon_head.obj");
-         TexKey texkey = TexKey.resource(Identifier.of("minecraft", "textures/entity/enderdragon/dragon.png"));
-         objtemplate.emit(mesh, null, (mat, normal) -> texkey, bx, by, bz, d0);
+         ObjTemplate template = ObjTemplate.getOrLoad(wall ? "dragon_wall_head.obj" : "dragon_head.obj");
+         TextureKey texture = TextureKey.resource(Identifier.ofVanilla("textures/entity/enderdragon/dragon.png"));
+         template.emit(mesh, null, (material, normal) -> texture, blockX, blockY, blockZ, yaw);
          return true;
-      } catch (IOException ioexception) {
-         warnings.add("dragon head template failed @ " + pos.toShortString() + ": " + ioexception.getMessage());
+      } catch (IOException exception) {
+         warnings.add("dragon head template failed @ " + pos.toShortString() + ": " + exception.getMessage());
          return false;
       }
    }
 
+   /** The owner's skin URL from the head's profile, or null when it has none or it can't be read. */
    private static String resolveSkinUrl(BlockRenderView world, BlockPos pos) {
       try {
-         if (!(world.getBlockEntity(pos) instanceof SkullBlockEntity skullblockentity)) {
+         if (!(world.getBlockEntity(pos) instanceof SkullBlockEntity skull)) {
             return null;
          }
 
-         ProfileComponent profilecomponent = skullblockentity.getOwner();
-         if (profilecomponent == null) {
+         ProfileComponent owner = skull.getOwner();
+         GameProfile profile = owner == null ? null : owner.getGameProfile();
+         if (profile == null) {
             return null;
          }
 
-         GameProfile gameprofile = profilecomponent.getGameProfile();
-         if (gameprofile == null) {
-            return null;
-         }
-
-         for (Property property : gameprofile.properties().get("textures")) {
-            String s = new String(Base64.getDecoder().decode(property.value()), StandardCharsets.UTF_8);
-            JsonObject jsonobject = JsonParser.parseString(s).getAsJsonObject();
-            JsonObject jsonobject1 = jsonobject.getAsJsonObject("textures");
-            if (jsonobject1 != null) {
-               JsonObject jsonobject2 = jsonobject1.getAsJsonObject("SKIN");
-               if (jsonobject2 != null) {
-                  return jsonobject2.get("url").getAsString();
-               }
+         for (Property property : profile.properties().get("textures")) {
+            String json = new String(Base64.getDecoder().decode(property.value()), StandardCharsets.UTF_8);
+            JsonObject textures = JsonParser.parseString(json).getAsJsonObject().getAsJsonObject("textures");
+            JsonObject skin = textures == null ? null : textures.getAsJsonObject("SKIN");
+            if (skin != null) {
+               return skin.get("url").getAsString();
             }
          }
-      } catch (Exception exception) {
+      } catch (Exception ignored) {
+         // A malformed profile just means the default skin.
       }
 
       return null;
+   }
+
+   /** An entity texture with the head at its top-left; the piglin's head is wider than the rest. */
+   private record Head(String texture, int textureHeight, double halfWidth) {
    }
 }
