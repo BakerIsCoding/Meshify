@@ -24,8 +24,7 @@ tasks.withType(JavaCompile).configureEach {
 	it.options.release = 21
 }
 
-// Self-check for the .glb container layout and vertex dedup. A JavaExec on the main
-// classpath rather than a test source set, so the project stays free of a test dependency.
+// Self-checks run as JavaExec on the main classpath, so the project needs no test dependency.
 tasks.register('glbCheck', JavaExec) {
 	group = 'verification'
 	description = 'Validates the GLB writer output'
@@ -38,6 +37,23 @@ tasks.register('boxUvCheck', JavaExec) {
 	description = 'Validates the cuboid texture unwrap, upright and flipped'
 	classpath = sourceSets.main.runtimeClasspath
 	mainClass = 'com.norwood.meshify.export.BoxUv'
+}
+
+tasks.register('selectionCheck', JavaExec) {
+	group = 'verification'
+	description = 'Validates resizing the selection one face at a time'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'com.norwood.meshify.Selection'
+	// Loading BlockPos starts Minecraft's logger, which drops a logs/ folder in the working directory.
+	workingDir = layout.buildDirectory.get().asFile
+}
+
+tasks.register('optionsCheck', JavaExec) {
+	group = 'verification'
+	description = 'Validates that menu choices survive the trip through the option string'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'com.norwood.meshify.MeshifyActions'
+	workingDir = layout.buildDirectory.get().asFile
 }
 
 java {

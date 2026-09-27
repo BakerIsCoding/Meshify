@@ -17,10 +17,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import net.minecraft.block.AbstractBannerBlock;
 import net.minecraft.block.AbstractSignBlock;
 import net.minecraft.block.AbstractSkullBlock;
@@ -46,6 +49,7 @@ import net.minecraft.client.util.math.Vector2f;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
+import net.minecraft.util.math.BlockBox;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Direction;
@@ -56,241 +60,54 @@ import org.joml.Vector3fc;
 public final class RegionExporter {
    public static final long MAX_VOLUME = 16000000L;
    private static final Direction[] DIRECTIONS = Direction.values();
+   /** Bit 1 of a bake layer, next to {@link BakeCollector#LAYER_ALPHA} in bit 0. */
+   private static final int BAKE_EMISSIVE_BIT = 2;
 
-   /**
-    * Reads the region and builds the mesh. Touches the world, the model manager and the block
-    * entity renderers, so it has to run on the client thread; {@link #finish} does the rest.
-    */
-   public static RegionExporter.Scan scan(MinecraftClient mc, ClientWorld world, BlockPos a, BlockPos b, ExportOptions opts) {
-      BlockPos blockpos = new BlockPos(Math.min(a.getX(), b.getX()), Math.min(a.getY(), b.getY()), Math.min(a.getZ(), b.getZ()));
-      BlockPos blockpos1 = new BlockPos(Math.max(a.getX(), b.getX()), Math.max(a.getY(), b.getY()), Math.max(a.getZ(), b.getZ()));
-      MeshBuilder meshbuilder = new MeshBuilder();
-      BakeCollector bakecollector = opts.bake() ? new BakeCollector(opts.bakeUvSize(), opts.bakeMaxAtlas()) : null;
-      BlockModels blockmodels = mc.getBlockRenderManager().getModels();
-      BlockColors blockcolors = mc.getBlockColors();
-      Random random = Random.create();
-      List<String> list = new ArrayList<>();
-      Set<String> set = new LinkedHashSet<>();
-      int i = 0;
-      int j = countUnloadedChunks(world, blockpos, blockpos1);
-      if (j > 0) {
-         list.add(j + " chunk(s) in range are not loaded; those blocks export as air");
-      }
-
-      for (BlockPos blockpos2 : BlockPos.iterate(blockpos, blockpos1)) {
-         BlockState blockstate = world.getBlockState(blockpos2);
-         if (!blockstate.isAir()) {
-            double d0 = blockpos2.getX() - blockpos.getX();
-            double d1 = blockpos2.getY() - blockpos.getY();
-            double d2 = blockpos2.getZ() - blockpos.getZ();
-            boolean flag = false;
-            FluidState fluidstate = blockstate.getFluidState();
-            if (!fluidstate.isEmpty()) {
-               FluidExporter.export(meshbuilder, world, blockpos2, fluidstate, blockpos, blockpos1, d0, d1, d2);
-               flag = true;
-            }
-
-            Block block = blockstate.getBlock();
-            if (block instanceof AbstractSkullBlock abstractskullblock) {
-               flag |= SkullExporter.export(meshbuilder, world, blockpos2, blockstate, abstractskullblock, d0, d1, d2, list);
-            } else if (block instanceof ChestBlock || block instanceof EnderChestBlock) {
-               ChestExporter.export(meshbuilder, blockstate, d0, d1, d2);
-               flag = true;
-            } else if (block instanceof AbstractSignBlock abstractsignblock) {
-               flag |= SignExporter.export(meshbuilder, mc, world, blockpos2, blockstate, abstractsignblock, d0, d1, d2, list);
-            } else if (block instanceof BedBlock bedblock) {
-               BedExporter.export(meshbuilder, blockstate, bedblock, d0, d1, d2);
-               flag = true;
-            } else if (block instanceof ShulkerBoxBlock shulkerboxblock) {
-               ShulkerExporter.export(meshbuilder, blockstate, shulkerboxblock, d0, d1, d2);
-               flag = true;
-            } else if (block instanceof AbstractBannerBlock abstractbannerblock) {
-               BannerExporter.export(meshbuilder, world, blockpos2, blockstate, abstractbannerblock, d0, d1, d2);
-               flag = true;
-            } else if (block instanceof DecoratedPotBlock) {
-               flag |= DecoratedPotExporter.export(meshbuilder, world, blockpos2, blockstate, d0, d1, d2, list);
-            } else {
-               boolean flag1 = false;
-               BlockEntity blockentity = world.getBlockEntity(blockpos2);
-               if (blockentity != null) {
-                  flag1 = BerCaptureExporter.export(meshbuilder, mc, blockpos2, blockentity, d0, d1, d2, list);
-                  flag |= flag1;
-               }
-
-               if (!flag1) {
-                  if (block instanceof BellBlock) {
-                     BellExporter.export(meshbuilder, d0, d1, d2);
-                     flag = true;
-                  } else if (block instanceof ConduitBlock) {
-                     ConduitExporter.export(meshbuilder, d0, d1, d2);
-                     flag = true;
-                  }
-               }
-
-               if (blockstate.getRenderType() == BlockRenderType.MODEL) {
-                  flag |= exportModelBlock(
-                     meshbuilder,
-                     world,
-                     blockmodels,
-                     blockcolors,
-                     random,
-                     blockstate,
-                     blockpos2,
-                     blockpos,
-                     blockpos1,
-                     d0,
-                     d1,
-                     d2,
-                     opts.aggressiveCull(),
-                     bakecollector
-                  );
-               }
-            }
-
-            if (flag) {
-               i++;
-            } else if (fluidstate.isEmpty()) {
-               set.add(Registries.BLOCK.getId(block).toString());
-            }
-         }
-      }
-
-      int k = EntityCaptureExporter.export(meshbuilder, mc, world, blockpos, blockpos1, list);
-      return new RegionExporter.Scan(meshbuilder, bakecollector, blockpos, blockpos1, i, k, set, list, j);
+   private RegionExporter() {
    }
 
-   /**
-    * Turns a {@link #scan} into files on disk. Only touches textures already pulled into memory,
-    * so it is safe to run off the client thread and keep the game responsive.
-    */
-   public static RegionExporter.Result finish(MinecraftClient mc, RegionExporter.Scan scan, ExportOptions opts) throws IOException {
-      MeshBuilder meshbuilder = scan.mesh();
-      List<String> list = scan.warnings();
-      BakeCollector bakecollector = scan.baker();
-      BakeCollector.Stats bakecollector$stats = null;
-      if (bakecollector != null && !bakecollector.isEmpty()) {
-         bakecollector$stats = bakecollector.flush(meshbuilder, list);
-      }
+   public static Path exportRoot(MinecraftClient mc) {
+      return mc.runDirectory.toPath().resolve("meshify");
+   }
 
-      MeshBuilder.OptStats meshbuilder$optstats = null;
-      int l = meshbuilder.faceCount();
-      if (opts.weldVertices()) {
-         meshbuilder$optstats = meshbuilder.optimize();
-      }
+   public static Path outputDir(MinecraftClient mc, String name) {
+      return exportRoot(mc).resolve(name);
+   }
 
-      Path path = mc.runDirectory.toPath().resolve("meshify").resolve(opts.name());
+   /** Writes a finished scan to disk off the client thread; {@code onStage} runs before each step and may throw to abort. */
+   public static RegionExporter.Result finish(MinecraftClient mc, RegionExporter.Scan scan, Consumer<ExportStage> onStage) throws IOException {
+      ExportOptions opts = scan.options();
+      MeshBuilder mesh = scan.mesh();
+      List<String> warnings = scan.warnings();
+      BakeCollector baker = scan.baker();
 
+      // The bake sources are native images, so they are freed however this ends, cancellation included.
       try {
-         ObjWriter.write(mc, path, opts, meshbuilder, list);
+         BakeCollector.Stats bakeStats = null;
+         if (baker != null && !baker.isEmpty()) {
+            onStage.accept(ExportStage.BAKING);
+            bakeStats = baker.flush(mesh, warnings);
+         }
+
+         int facesBeforeOptimize = mesh.faceCount();
+         MeshBuilder.OptStats optStats = null;
+         if (opts.weldVertices()) {
+            onStage.accept(ExportStage.OPTIMIZING);
+            optStats = mesh.optimize();
+         }
+
+         Path outDir = outputDir(mc, opts.name());
+         ObjWriter.write(mc, outDir, opts, mesh, warnings, onStage);
+         RegionExporter.Result result = new RegionExporter.Result(
+            scan.blocks(), scan.entities(), mesh.faceCount(), scan.skipped(), scan.unloadedChunks(), warnings, outDir, bakeStats, optStats,
+            facesBeforeOptimize
+         );
+         writeInfo(scan, result);
+         return result;
       } finally {
-         if (bakecollector != null) {
-            bakecollector.close();
+         if (baker != null) {
+            baker.close();
          }
-      }
-
-      writeInfo(
-         path, opts, scan.min(), scan.max(), scan.blocks(), scan.entities(), meshbuilder.faceCount(), scan.skipped(), list, bakecollector$stats,
-         meshbuilder$optstats, l
-      );
-      return new RegionExporter.Result(
-         scan.blocks(), scan.entities(), meshbuilder.faceCount(), scan.skipped(), scan.unloadedChunks(), list, path, bakecollector$stats,
-         meshbuilder$optstats, l
-      );
-   }
-
-   private static boolean exportModelBlock(
-      MeshBuilder mesh,
-      ClientWorld world,
-      BlockModels models,
-      BlockColors colors,
-      Random random,
-      BlockState state,
-      BlockPos pos,
-      BlockPos min,
-      BlockPos max,
-      double bx,
-      double by,
-      double bz,
-      boolean aggressiveCull,
-      BakeCollector baker
-   ) {
-      BlockStateModel blockstatemodel = models.getModel(state);
-      random.setSeed(state.getRenderingSeed(pos));
-      List<BlockModelPart> list = blockstatemodel.getParts(random);
-      if (list.isEmpty()) {
-         return false;
-      } else {
-         Vec3d vec3d = state.getModelOffset(pos);
-         boolean flag = false;
-         boolean flag2 = state.getLuminance() > 0;
-         int i2 = (state.isOpaque() ? 0 : 1) | (flag2 ? 2 : 0);
-
-         for (BlockModelPart blockmodelpart : list) {
-            for (int i = -1; i < DIRECTIONS.length; i++) {
-               Direction direction = i < 0 ? null : DIRECTIONS[i];
-               List<BakedQuad> list1 = blockmodelpart.getQuads(direction);
-               if (!list1.isEmpty()) {
-                  flag = true;
-                  if (direction != null && !isBoundary(pos, direction, min, max)) {
-                     BlockState blockstate = world.getBlockState(pos.offset(direction));
-                     boolean flag1 = !Block.shouldDrawSide(state, blockstate, direction);
-                     if (!flag1 && aggressiveCull) {
-                        flag1 = neighborFullyOccludes(blockstate, direction);
-                     }
-
-                     if (flag1) {
-                        continue;
-                     }
-                  }
-
-                  for (BakedQuad bakedquad : list1) {
-                     Sprite sprite = bakedquad.sprite();
-                     if (sprite != null) {
-                        int j = -1;
-                        if (bakedquad.tintIndex() >= 0) {
-                           j = colors.getColor(state, world, pos, bakedquad.tintIndex()) & 16777215;
-                           if (j == 16777215) {
-                              j = -1;
-                           }
-                        }
-
-                        float f = sprite.getMinU();
-                        float f1 = sprite.getMaxU();
-                        float f2 = sprite.getMinV();
-                        float f3 = sprite.getMaxV();
-                        float f4 = f1 - f;
-                        float f5 = f3 - f2;
-                        float[][] afloat = new float[4][3];
-                        float[][] afloat1 = new float[4][2];
-
-                        for (int k = 0; k < 4; k++) {
-                           Vector3fc vector3fc = bakedquad.getPosition(k);
-                           afloat[k][0] = (float)(bx + vector3fc.x() + vec3d.x);
-                           afloat[k][1] = (float)(by + vector3fc.y() + vec3d.y);
-                           afloat[k][2] = (float)(bz + vector3fc.z() + vec3d.z);
-                           long l = bakedquad.getTexcoords(k);
-                           float f6 = Vector2f.getX(l);
-                           float f7 = Vector2f.getY(l);
-                           afloat1[k][0] = f4 > 0.0F ? clamp01((f6 - f) / f4) : 0.0F;
-                           afloat1[k][1] = f5 > 0.0F ? clamp01((f7 - f2) / f5) : 0.0F;
-                        }
-
-                        TexKey texkey = TexKey.sprite(sprite, j);
-                        if (baker == null || direction == null || !baker.tryAdd(bx, by, bz, direction, texkey, afloat, afloat1, i2)) {
-                           if (flag2) {
-                              mesh.markEmissive(texkey.id());
-                           }
-
-                           Vector3fc vector3fc1 = bakedquad.face().getFloatVector();
-                           mesh.addQuad(texkey, afloat, afloat1, new float[]{vector3fc1.x(), vector3fc1.y(), vector3fc1.z()});
-                        }
-                     }
-                  }
-               }
-            }
-         }
-
-         return flag;
       }
    }
 
@@ -314,16 +131,6 @@ public final class RegionExporter {
       }
    }
 
-   private static boolean isBoundary(BlockPos pos, Direction dir, BlockPos min, BlockPos max) {
-      BlockPos blockpos = pos.offset(dir);
-      return blockpos.getX() < min.getX()
-         || blockpos.getX() > max.getX()
-         || blockpos.getY() < min.getY()
-         || blockpos.getY() > max.getY()
-         || blockpos.getZ() < min.getZ()
-         || blockpos.getZ() > max.getZ();
-   }
-
    public static int countUnloadedChunks(ClientWorld world, BlockPos min, BlockPos max) {
       int i = 0;
       ChunkPos chunkpos = new ChunkPos(min);
@@ -340,31 +147,47 @@ public final class RegionExporter {
       return i;
    }
 
-   private static void writeInfo(
-      Path outDir,
-      ExportOptions opts,
-      BlockPos min,
-      BlockPos max,
-      int blocks,
-      int entities,
-      int faces,
-      Set<String> skipped,
-      List<String> warnings,
-      BakeCollector.Stats bakeStats,
-      MeshBuilder.OptStats optStats,
-      int facesBeforeOptimize
-   ) {
+   /** Smallest box around the non-air blocks, if any; unloaded chunks read as air, so check them first. */
+   public static Optional<BlockBox> solidBounds(ClientWorld world, BlockPos min, BlockPos max) {
+      // ponytail: reads every block on the client thread (~1 s at the limit); skip empty chunk sections if it stalls.
+      int loX = Integer.MAX_VALUE;
+      int loY = Integer.MAX_VALUE;
+      int loZ = Integer.MAX_VALUE;
+      int hiX = Integer.MIN_VALUE;
+      int hiY = Integer.MIN_VALUE;
+      int hiZ = Integer.MIN_VALUE;
+
+      for (BlockPos pos : BlockPos.iterate(min, max)) {
+         if (!world.getBlockState(pos).isAir()) {
+            loX = Math.min(loX, pos.getX());
+            loY = Math.min(loY, pos.getY());
+            loZ = Math.min(loZ, pos.getZ());
+            hiX = Math.max(hiX, pos.getX());
+            hiY = Math.max(hiY, pos.getY());
+            hiZ = Math.max(hiZ, pos.getZ());
+         }
+      }
+
+      return loX > hiX ? Optional.empty() : Optional.of(new BlockBox(loX, loY, loZ, hiX, hiY, hiZ));
+   }
+
+   private static void writeInfo(RegionExporter.Scan scan, RegionExporter.Result result) {
+      ExportOptions opts = scan.options();
+      int faces = result.facesEmitted();
+      BakeCollector.Stats bakeStats = result.bakeStats();
+      MeshBuilder.OptStats optStats = result.optStats();
+
       try {
          StringBuilder stringbuilder = new StringBuilder();
          stringbuilder.append("meshify export: ").append(opts.name()).append('\n');
-         stringbuilder.append("region: ").append(min.toShortString()).append(" .. ").append(max.toShortString()).append('\n');
+         stringbuilder.append("region: ").append(scan.min().toShortString()).append(" .. ").append(scan.max().toShortString()).append('\n');
          stringbuilder.append("textures: ")
             .append(opts.mergeAtlas() ? "single atlas" : "separate files")
             .append(", scale x")
             .append(opts.texScale())
             .append('\n');
          stringbuilder.append("options: ").append(opts.aggressiveCull() ? "aggressive-cull " : "").append(opts.weldVertices() ? "weld " : "").append('\n');
-         stringbuilder.append("blocks exported: ").append(blocks).append(", entities: ").append(entities).append(", faces: ").append(faces).append('\n');
+         stringbuilder.append("blocks exported: ").append(result.blocksExported()).append(", entities: ").append(result.entitiesExported()).append(", faces: ").append(faces).append('\n');
          if (bakeStats != null) {
             stringbuilder.append(
                String.format(
@@ -384,7 +207,7 @@ public final class RegionExporter {
                String.format(
                   Locale.ROOT,
                   "optimize: %d -> %d faces (%d degenerate, %d duplicate removed, weld grid 1/%d block)%n",
-                  facesBeforeOptimize,
+                  result.facesBeforeOptimize(),
                   faces,
                   optStats.degenerateRemoved(),
                   optStats.duplicateRemoved(),
@@ -393,29 +216,271 @@ public final class RegionExporter {
             );
          }
 
-         if (!skipped.isEmpty()) {
+         if (!result.skippedTypes().isEmpty()) {
             stringbuilder.append("\nskipped block types (no baked geometry / unsupported):\n");
 
-            for (String s : skipped) {
+            for (String s : result.skippedTypes()) {
                stringbuilder.append("  - ").append(s).append('\n');
             }
          }
 
-         if (!warnings.isEmpty()) {
+         if (!result.warnings().isEmpty()) {
             stringbuilder.append("\nwarnings:\n");
 
-            for (String s1 : warnings) {
+            for (String s1 : result.warnings()) {
                stringbuilder.append("  - ").append(s1).append('\n');
             }
          }
 
-         Files.writeString(outDir.resolve("export_info.txt"), stringbuilder.toString(), StandardCharsets.UTF_8);
+         Files.writeString(result.outDir().resolve("export_info.txt"), stringbuilder.toString(), StandardCharsets.UTF_8);
       } catch (IOException ioexception) {
       }
    }
 
-   /** Everything {@link #finish} needs, so it can run without touching the world again. */
+   /** Builds the mesh a slice at a time on the client thread; {@link #finish} does the rest off it. */
+   public static final class Scanner {
+      /** Reading the clock costs about as much as skipping an air block, so it is read every 256 blocks. */
+      private static final int CLOCK_CHECK_MASK = 0xFF;
+
+      private final MinecraftClient mc;
+      private final ClientWorld world;
+      private final BlockPos min;
+      private final BlockPos max;
+      private final ExportOptions options;
+      private final BlockBox bounds;
+      private final MeshBuilder mesh = new MeshBuilder();
+      private final BakeCollector baker;
+      private final BlockModels models;
+      private final BlockColors colors;
+      private final Random random = Random.create();
+      private final List<String> warnings = new ArrayList<>();
+      private final Set<String> skipped = new LinkedHashSet<>();
+      private final Iterator<BlockPos> cursor;
+      private final long volume;
+      private final int unloadedChunks;
+      private long visited;
+      private int exportedBlocks;
+
+      public Scanner(BlockPos a, BlockPos b, ExportOptions opts) {
+         this.mc = MinecraftClient.getInstance();
+         this.world = this.mc.world;
+         this.bounds = BlockBox.create(a, b);
+         this.min = new BlockPos(this.bounds.getMinX(), this.bounds.getMinY(), this.bounds.getMinZ());
+         this.max = new BlockPos(this.bounds.getMaxX(), this.bounds.getMaxY(), this.bounds.getMaxZ());
+         this.options = opts;
+         this.baker = opts.bake() ? new BakeCollector(opts.bakeUvSize(), opts.bakeMaxAtlas()) : null;
+         this.models = mc.getBlockRenderManager().getModels();
+         this.colors = mc.getBlockColors();
+         this.cursor = BlockPos.iterate(this.min, this.max).iterator();
+         this.volume = (this.max.getX() - this.min.getX() + 1L) * (this.max.getY() - this.min.getY() + 1L) * (this.max.getZ() - this.min.getZ() + 1L);
+         this.unloadedChunks = countUnloadedChunks(this.world, this.min, this.max);
+         if (this.unloadedChunks > 0) {
+            this.warnings.add(this.unloadedChunks + " chunk(s) in range are not loaded; those blocks export as air");
+         }
+      }
+
+      public ClientWorld world() {
+         return this.world;
+      }
+
+      public double progress() {
+         return (double)this.visited / this.volume;
+      }
+
+      /** Reads blocks until {@code deadlineNanos} passes; true once the whole region has been read. */
+      public boolean step(long deadlineNanos) {
+         while (this.cursor.hasNext()) {
+            if (this.exportBlock(this.cursor.next())) {
+               this.exportedBlocks++;
+            }
+
+            if ((++this.visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() > deadlineNanos) {
+               break;
+            }
+         }
+
+         return !this.cursor.hasNext();
+      }
+
+      /** Captures the entities in one go and packages everything for {@link #finish}. */
+      public RegionExporter.Scan complete() {
+         int entities = EntityCaptureExporter.export(this.mesh, this.mc, this.world, this.min, this.max, this.warnings);
+         return new RegionExporter.Scan(
+            this.options, this.mesh, this.baker, this.min, this.max, this.exportedBlocks, entities, this.skipped, this.warnings, this.unloadedChunks
+         );
+      }
+
+      /** Frees the bake sources of a scan that will never reach {@link #finish}. */
+      public void discard() {
+         if (this.baker != null) {
+            this.baker.close();
+         }
+      }
+
+      /** Adds one block to the mesh; false for air and for blocks nothing knows how to export. */
+      private boolean exportBlock(BlockPos pos) {
+         BlockState state = this.world.getBlockState(pos);
+         if (state.isAir()) {
+            return false;
+         }
+
+         double bx = pos.getX() - this.min.getX();
+         double by = pos.getY() - this.min.getY();
+         double bz = pos.getZ() - this.min.getZ();
+         boolean exported = false;
+         FluidState fluid = state.getFluidState();
+         if (!fluid.isEmpty()) {
+            FluidExporter.export(this.mesh, this.world, pos, fluid, this.min, this.max, bx, by, bz);
+            exported = true;
+         }
+
+         Block block = state.getBlock();
+         if (block instanceof AbstractSkullBlock skull) {
+            exported |= SkullExporter.export(this.mesh, this.world, pos, state, skull, bx, by, bz, this.warnings);
+         } else if (block instanceof ChestBlock || block instanceof EnderChestBlock) {
+            ChestExporter.export(this.mesh, state, bx, by, bz);
+            exported = true;
+         } else if (block instanceof AbstractSignBlock sign) {
+            exported |= SignExporter.export(this.mesh, this.mc, this.world, pos, state, sign, bx, by, bz, this.warnings);
+         } else if (block instanceof BedBlock bed) {
+            BedExporter.export(this.mesh, state, bed, bx, by, bz);
+            exported = true;
+         } else if (block instanceof ShulkerBoxBlock shulkerBox) {
+            ShulkerExporter.export(this.mesh, state, shulkerBox, bx, by, bz);
+            exported = true;
+         } else if (block instanceof AbstractBannerBlock banner) {
+            BannerExporter.export(this.mesh, this.world, pos, state, banner, bx, by, bz);
+            exported = true;
+         } else if (block instanceof DecoratedPotBlock) {
+            exported |= DecoratedPotExporter.export(this.mesh, this.world, pos, state, bx, by, bz, this.warnings);
+         } else {
+            boolean rendererCaptured = false;
+            BlockEntity blockEntity = this.world.getBlockEntity(pos);
+            if (blockEntity != null) {
+               rendererCaptured = BerCaptureExporter.export(this.mesh, this.mc, pos, blockEntity, bx, by, bz, this.warnings);
+               exported |= rendererCaptured;
+            }
+
+            if (!rendererCaptured) {
+               if (block instanceof BellBlock) {
+                  BellExporter.export(this.mesh, bx, by, bz);
+                  exported = true;
+               } else if (block instanceof ConduitBlock) {
+                  ConduitExporter.export(this.mesh, bx, by, bz);
+                  exported = true;
+               }
+            }
+
+            if (state.getRenderType() == BlockRenderType.MODEL) {
+               exported |= this.exportModelBlock(state, pos);
+            }
+         }
+
+         if (!exported) {
+            this.skipped.add(Registries.BLOCK.getId(block).toString());
+         }
+
+         return exported;
+      }
+
+      private boolean exportModelBlock(BlockState state, BlockPos pos) {
+         BlockStateModel model = this.models.getModel(state);
+         this.random.setSeed(state.getRenderingSeed(pos));
+         List<BlockModelPart> parts = model.getParts(this.random);
+         if (parts.isEmpty()) {
+            return false;
+         }
+
+         BlockPos local = pos.subtract(this.min);
+         QuadContext context = new QuadContext(state, pos, state.getModelOffset(pos), local.getX(), local.getY(), local.getZ(), state.getLuminance() > 0);
+         boolean hasQuads = false;
+
+         for (BlockModelPart part : parts) {
+            for (int i = -1; i < DIRECTIONS.length; i++) {
+               Direction face = i < 0 ? null : DIRECTIONS[i];
+               List<BakedQuad> quads = part.getQuads(face);
+               if (quads.isEmpty()) {
+                  continue;
+               }
+
+               hasQuads = true;
+               if (face != null && this.isHidden(state, pos, face)) {
+                  continue;
+               }
+
+               for (BakedQuad quad : quads) {
+                  this.exportQuad(quad, face, context);
+               }
+            }
+         }
+
+         return hasQuads;
+      }
+
+      /** Faces on the region boundary always stay, so the cut edge of a build is not left open. */
+      private boolean isHidden(BlockState state, BlockPos pos, Direction face) {
+         BlockPos neighborPos = pos.offset(face);
+         if (!this.bounds.contains(neighborPos)) {
+            return false;
+         }
+
+         BlockState neighbor = this.world.getBlockState(neighborPos);
+         return !Block.shouldDrawSide(state, neighbor, face) || this.options.aggressiveCull() && neighborFullyOccludes(neighbor, face);
+      }
+
+      private void exportQuad(BakedQuad quad, Direction face, QuadContext context) {
+         Sprite sprite = quad.sprite();
+         if (sprite == null) {
+            return;
+         }
+
+         int tint = -1;
+         if (quad.tintIndex() >= 0) {
+            tint = this.colors.getColor(context.state(), this.world, context.pos(), quad.tintIndex()) & 0xFFFFFF;
+            if (tint == 0xFFFFFF) {
+               tint = -1;
+            }
+         }
+
+         float minU = sprite.getMinU();
+         float minV = sprite.getMinV();
+         float spanU = sprite.getMaxU() - minU;
+         float spanV = sprite.getMaxV() - minV;
+         float[][] positions = new float[4][3];
+         float[][] uvs = new float[4][2];
+
+         for (int k = 0; k < 4; k++) {
+            Vector3fc vertex = quad.getPosition(k);
+            positions[k][0] = (float)(context.bx() + vertex.x() + context.offset().x);
+            positions[k][1] = (float)(context.by() + vertex.y() + context.offset().y);
+            positions[k][2] = (float)(context.bz() + vertex.z() + context.offset().z);
+            long texcoords = quad.getTexcoords(k);
+            uvs[k][0] = spanU > 0.0F ? clamp01((Vector2f.getX(texcoords) - minU) / spanU) : 0.0F;
+            uvs[k][1] = spanV > 0.0F ? clamp01((Vector2f.getY(texcoords) - minV) / spanV) : 0.0F;
+         }
+
+         TexKey texKey = TexKey.sprite(sprite, tint);
+         if (this.baker != null && face != null && this.baker.tryAdd(context.bx(), context.by(), context.bz(), face, texKey, positions, uvs, context.bakeLayer())) {
+            return;
+         }
+
+         if (context.emissive()) {
+            this.mesh.markEmissive(texKey.id());
+         }
+
+         Vector3fc normal = quad.face().getFloatVector();
+         this.mesh.addQuad(texKey, positions, uvs, new float[]{normal.x(), normal.y(), normal.z()});
+      }
+   }
+
+   private record QuadContext(BlockState state, BlockPos pos, Vec3d offset, double bx, double by, double bz, boolean emissive) {
+      int bakeLayer() {
+         return (this.state.isOpaque() ? BakeCollector.LAYER_SOLID : BakeCollector.LAYER_ALPHA) | (this.emissive ? BAKE_EMISSIVE_BIT : 0);
+      }
+   }
+
    public record Scan(
+      ExportOptions options,
       MeshBuilder mesh,
       BakeCollector baker,
       BlockPos min,

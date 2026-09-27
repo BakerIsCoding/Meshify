@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.Consumer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 
@@ -17,7 +18,9 @@ public final class ObjWriter {
    private ObjWriter() {
    }
 
-   public static void write(MinecraftClient mc, Path outDir, ExportOptions opts, MeshBuilder mesh, List<String> warnings) throws IOException {
+   public static void write(MinecraftClient mc, Path outDir, ExportOptions opts, MeshBuilder mesh, List<String> warnings, Consumer<ExportStage> onStage)
+      throws IOException {
+      onStage.accept(ExportStage.TEXTURES);
       Files.createDirectories(outDir);
 
       try (TextureStore texturestore = new TextureStore(mc, opts.texScale())) {
@@ -54,9 +57,11 @@ public final class ObjWriter {
 
             Path path1 = outDir.resolve("atlas.png");
             texturestore$atlas.image().writeTo(path1);
+            onStage.accept(ExportStage.GLB);
             writeGlb(outDir, opts, mesh, map, texturestore, Files.readAllBytes(path1), warnings);
          }
 
+         onStage.accept(ExportStage.OBJ);
          writeObj(outDir, opts, mesh, map);
          writeMtl(outDir, opts, mesh);
       }
@@ -78,15 +83,9 @@ public final class ObjWriter {
       }
    }
 
-   /**
-    * Picks the glTF alpha mode from the texture itself: fully opaque stays opaque, purely on/off
-    * alpha becomes a cutout mask, and anything with partial alpha has to blend. Reading it off the
-    * pixels rather than the block state means the special exporters (signs, banners, skins) get
-    * classified correctly too, without threading a flag through all of them.
-    */
+   /** glTF alpha mode read from the pixels, so the special exporters get classified without extra flags. */
    private static int classifyAlpha(String id, NativeImage img) {
-      // ponytail: water and lava are opaque in the texture and only turn translucent through their
-      // render layer, so they are the one case the pixels cannot tell us about.
+      // ponytail: water and lava only turn translucent through their render layer, which the pixels can't show.
       if (id.startsWith("water")) {
          return GlbWriter.BLEND;
       }

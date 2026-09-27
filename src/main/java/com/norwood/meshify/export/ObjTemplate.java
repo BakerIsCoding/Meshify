@@ -103,10 +103,6 @@ public final class ObjTemplate {
       }
    }
 
-   public boolean hasGroup(String name) {
-      return this.groups.containsKey(name);
-   }
-
    public void emit(MeshBuilder mesh, String group, BiFunction<String, float[], TexKey> resolver, double bx, double by, double bz, double yawDeg) {
       double d0 = Math.toRadians(yawDeg);
       double d1 = Math.cos(d0);

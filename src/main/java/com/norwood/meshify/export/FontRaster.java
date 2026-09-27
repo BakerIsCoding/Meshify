@@ -18,23 +18,10 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.resource.Resource;
 import net.minecraft.util.Identifier;
 
-/**
- * Rasterises sign text with Minecraft's own default font, so an exported sign reads the way the
- * game draws it rather than in some substitute typeface.
- *
- * <p>Glyphs come from the bitmap providers of {@code font/include/default.json} — ascii, accented
- * and nonlatin_european — which together cover Latin, the accented ranges, Greek and Cyrillic.
- * They are kept in font units and blown up by {@link #SCALE} at draw time: the sheets are pixel
- * art, so only an integer scale stays crisp, and the export is sampled nearest anyway.
- */
+/** Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic. */
 public final class FontRaster {
-   /**
-    * Texels per font unit. One is the game's own grid: a sign's text is drawn at 96 units to the
-    * block, six times finer than the block texture, which is what the canvas already resolves.
-    * Raising it only repeats texels, since the export is sampled nearest, and costs atlas for it.
-    */
+   /** Texels per font unit; 1 already matches the sign's text grid, higher only repeats texels. */
    public static final int SCALE = 1;
-   /** What the game leaves per line of sign text. */
    public static final int LINE_HEIGHT = 10;
    /** Where the default font's baseline sits inside its line; each provider hangs off it. */
    private static final int BASELINE = 7;
@@ -63,7 +50,7 @@ public final class FontRaster {
       }
    }
 
-   /** Whether {@link #render} can draw this character. Only valid once {@link #ensureLoaded} ran. */
+   /** Only valid once {@link #ensureLoaded} ran. */
    public static boolean covers(int codePoint) {
       return codePoint == 32 || glyphs != null && glyphs.containsKey(codePoint);
    }
@@ -75,8 +62,7 @@ public final class FontRaster {
          readSheet(mc, jsonobject, map);
       }
 
-      // 'A' stands in for "the sheets we read actually cover ordinary text". Without it a sign
-      // rasterises to a fully transparent quad and the export looks blank with nothing to explain it.
+      // No 'A' means the sheets were not read, and every sign would export blank without a warning.
       if (!map.containsKey(65)) {
          throw new IOException("no Latin glyphs in the default font");
       } else {
@@ -110,10 +96,7 @@ public final class FontRaster {
       }
    }
 
-   /**
-    * Cuts one sheet into glyphs. The game keeps the pixels on the GPU and scales them per draw; we
-    * only ever need the mask, so each cell is squeezed into one bit per pixel and the image dropped.
-    */
+   /** Cuts one sheet into glyphs, keeping only a one-bit-per-pixel mask. */
    private static void readSheet(MinecraftClient mc, JsonObject provider, Map<Integer, FontRaster.Glyph> out) throws IOException {
       Identifier identifier = Identifier.of(provider.get("file").getAsString());
       Identifier identifier1 = Identifier.of(identifier.getNamespace(), "textures/" + identifier.getPath());
@@ -138,8 +121,7 @@ public final class FontRaster {
                try {
                   int j1 = nativeimage.getWidth() / k;
                   int k1 = nativeimage.getHeight() / i;
-                  // One int of mask per row. Every vanilla sheet is 8 or 9 wide; a pack with wider
-                  // cells is rare enough to skip rather than carry a second mask representation.
+                  // One int of mask per row; vanilla cells are 8 or 9 wide, so wider ones are skipped.
                   if (j1 >= 1 && j1 <= 32 && k1 >= 1) {
                      for (int l1 = 0; l1 < i; l1++) {
                         for (int i2 = 0; i2 < aint[l1].length && i2 < k; i2++) {
@@ -218,7 +200,6 @@ public final class FontRaster {
       return nativeimage;
    }
 
-   /** How far the pen moves past this character, in texels. */
    private static int advance(int codePoint) {
       FontRaster.Glyph fontraster$glyph = glyphs.get(codePoint);
       return fontraster$glyph == null || codePoint == 32

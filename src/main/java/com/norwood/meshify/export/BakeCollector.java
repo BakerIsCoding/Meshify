@@ -100,8 +100,7 @@ public final class BakeCollector {
       int j = 0;
       long k = 0L;
 
-      // Bit 0 is opaque/alpha, bit 1 is emissive. Both are part of PlaneKey, so faces only ever
-      // merge with faces of the same kind and each kind lands on its own sheet.
+      // Layer bit 0 is opaque/alpha and bit 1 emissive; faces only merge within the same layer, one sheet each.
       for (int l = 0; l <= 3; l++) {
          List<BakeCollector.Rect> list = new ArrayList<>();
 

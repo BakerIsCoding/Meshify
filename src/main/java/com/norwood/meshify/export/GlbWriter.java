@@ -12,18 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Writes the mesh as one self-contained .glb (glTF 2.0 binary).
- *
- * <p>Tuned for a web viewer rather than a DCC tool:
- * <ul>
- *   <li>{@code KHR_materials_unlit} plus Minecraft's directional face shading baked into
- *       {@code COLOR_0}, so the model needs no lights and matches the in-game look.</li>
- *   <li>One atlas texture and at most three primitives (opaque / alpha-mask / blend), so a
- *       viewer issues three draw calls no matter how many block types are in the region.</li>
- *   <li>No {@code NORMAL} attribute: unlit ignores it, and it costs 12 bytes per vertex.</li>
- * </ul>
- */
+/** Writes a self-contained .glb for web viewers: unlit, with baked face shading, one atlas and at most three draw calls. */
 public final class GlbWriter {
    public static final int OPAQUE = 0;
    public static final int MASK = 1;
@@ -44,10 +33,7 @@ public final class GlbWriter {
    private GlbWriter() {
    }
 
-   /**
-    * @param uvXform    per-texture-key atlas transform {@code {scaleU, scaleV, offsetU, offsetV}}
-    * @param alphaClass per-texture-key {@link #OPAQUE}/{@link #MASK}/{@link #BLEND}
-    */
+   /** {@code uvXform} is {scaleU, scaleV, offsetU, offsetV} and {@code alphaClass} is OPAQUE/MASK/BLEND, per texture key. */
    public static void write(
       Path outDir, String name, byte[] atlasPng, MeshBuilder mesh, Map<String, float[]> uvXform, Map<String, Integer> alphaClass
    ) throws IOException {
@@ -56,9 +42,7 @@ public final class GlbWriter {
       for (Map.Entry<String, List<MeshBuilder.Quad>> entry : mesh.quads().entrySet()) {
          float[] t = uvXform.getOrDefault(entry.getKey(), UV_IDENTITY);
          Bucket bucket = buckets[clampMode(alphaClass.getOrDefault(entry.getKey(), OPAQUE))];
-         // A light source reads as lit from every angle in-game, and an unlit export has no
-         // lightmap to say so, so the only way to keep it from looking like dead stone is to skip
-         // the directional darkening. Costs no extra material: it is just a different vertex colour.
+         // Emissive faces skip the directional shading, or an unlit export makes them look like dead stone.
          boolean emissive = mesh.emissiveKeys().contains(entry.getKey());
 
          for (MeshBuilder.Quad quad : entry.getValue()) {
@@ -67,8 +51,7 @@ public final class GlbWriter {
 
             for (int i = 0; i < 4; i++) {
                float[] p = quad.pos()[i];
-               // glTF's UV origin is top-left, the same as the atlas image, so unlike the OBJ
-               // path there is no V flip here.
+               // glTF's UV origin is top-left like the atlas, so unlike the OBJ path there is no V flip.
                float u = t[2] + quad.uv()[i][0] * t[0];
                float v = t[3] + quad.uv()[i][1] * t[1];
                vi[i] = bucket.vertex(p[0], p[1], p[2], u, v, shade);
@@ -82,11 +65,7 @@ public final class GlbWriter {
       Files.write(outDir.resolve(name + ".glb"), build(buckets, atlasPng));
    }
 
-   /**
-    * Minecraft darkens a face by its facing: top full, north/south 0.8, east/west 0.6, bottom 0.5.
-    * Reproducing it is most of what makes an unlit export read as Minecraft rather than as a flat
-    * blob of textures.
-    */
+   /** Minecraft's face shading: top 1.0, north/south 0.8, east/west 0.6, bottom 0.5. */
    static byte shadeByte(float[] normal) {
       float ax = Math.abs(normal[0]);
       float ay = Math.abs(normal[1]);
@@ -103,12 +82,7 @@ public final class GlbWriter {
       return (byte)Math.round(srgbToLinear(shade) * 255.0F);
    }
 
-   /**
-    * The game multiplies the texel by the shade factor in sRGB space, but glTF declares
-    * {@code COLOR_0} to be linear, so a viewer decodes the texture, multiplies, then re-encodes.
-    * Storing the factor linearised makes that round trip land back on the game's number instead of
-    * washing every shaded face out.
-    */
+   /** The game shades in sRGB but glTF's COLOR_0 is linear, so the factor is stored linearised. */
    private static float srgbToLinear(float c) {
       return c <= 0.04045F ? c / 12.92F : (float)Math.pow((c + 0.055F) / 1.055F, 2.4);
    }
@@ -116,8 +90,6 @@ public final class GlbWriter {
    private static int clampMode(int mode) {
       return mode < OPAQUE || mode > BLEND ? OPAQUE : mode;
    }
-
-   // ---------------------------------------------------------------- container
 
    private static byte[] build(Bucket[] buckets, byte[] atlasPng) throws IOException {
       ByteArrayOutputStream bin = new ByteArrayOutputStream();
@@ -191,8 +163,7 @@ public final class GlbWriter {
          sb.append(",\"alphaCutoff\":0.5");
       }
 
-      // Foliage and glass are seen from both sides in-game; leaving them single-sided punches
-      // holes in the build, which is a worse trade than the extra fill on those two buckets.
+      // Foliage and glass are two-sided in-game; single-sided faces would punch holes in the build.
       if (mode != OPAQUE) {
          sb.append(",\"doubleSided\":true");
       }
@@ -282,8 +253,6 @@ public final class GlbWriter {
       return sb.toString();
    }
 
-   // ---------------------------------------------------------------- buckets
-
    /** One alpha mode's worth of geometry: deduplicated vertices plus a triangle index list. */
    private static final class Bucket {
       private final Map<Vertex, Integer> lookup = new HashMap<>();
@@ -355,8 +324,7 @@ public final class GlbWriter {
       }
 
       byte[] colors(int n) {
-         // Grey shading, so r=g=b; VEC4 rather than VEC3 because glTF wants vertex attribute
-         // elements 4-byte aligned and a 3-byte element is not.
+         // Grey, so r=g=b; VEC4 because glTF wants attribute elements 4-byte aligned.
          ByteBuffer buf = ByteBuffer.allocate(n * 4).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
             buf.put(vertex.shade()).put(vertex.shade()).put(vertex.shade()).put((byte)255);
@@ -381,8 +349,6 @@ public final class GlbWriter {
 
    private record Vertex(float x, float y, float z, float u, float v, byte shade) {
    }
-
-   // ---------------------------------------------------------------- self-check
 
    /** Run with {@code gradlew glbCheck}. */
    public static void main(String[] args) throws IOException {
@@ -430,8 +396,7 @@ public final class GlbWriter {
       check(j % 4 == 0, "BIN chunk is 4-byte aligned");
       check(12 + 8 + i + 8 + j == abyte.length, "chunks fill the file exactly");
 
-      // The two identical quads must collapse to one set of 4 vertices and 12 indices; if the
-      // dedup breaks, this is what catches it.
+      // Two identical quads must dedup to 4 vertices and 12 indices.
       check(s.contains("\"count\":4,\"type\":\"VEC3\""), "opaque quads deduplicated to 4 vertices");
       check(s.contains("\"count\":12,\"type\":\"SCALAR\""), "opaque bucket emitted 12 indices");
       check(s.contains("\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5"), "cutout material");

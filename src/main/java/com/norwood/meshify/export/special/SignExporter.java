@@ -240,8 +240,7 @@ public final class SignExporter {
       } else if (!FontRaster.ensureLoaded(mc, warnings)) {
          return null;
       } else {
-         // The default font covers Latin, Greek and Cyrillic; anything else would just go missing
-         // from the sign, which is the kind of thing you only notice long after the export.
+         // Characters the font lacks would silently vanish from the sign, so they get a warning.
          String s1 = stringbuilder.toString().codePoints().filter(cp -> cp != 10 && !FontRaster.covers(cp)).collect(
             StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append
          ).toString();

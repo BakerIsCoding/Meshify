@@ -1,26 +1,23 @@
 package com.norwood.meshify;
 
+import com.norwood.meshify.Selection.Corner;
+import java.util.ArrayList;
+import java.util.List;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderLayers;
+import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShapes;
 
-/**
- * The point-and-click half of the mod: two keys set the corners from whatever block the crosshair
- * is on, and the pending region is drawn in the world so you can see what will be exported before
- * running the command.
- */
+/** The corner keys and the in-world outline of the selection. */
 public final class SelectionRenderer {
    private static final int START_COLOR = 0xFF55FF55;
    private static final int END_COLOR = 0xFFFF5555;
@@ -43,44 +40,49 @@ public final class SelectionRenderer {
 
       ClientTickEvents.END_CLIENT_TICK.register(client -> {
          while (setStart.wasPressed()) {
-            setCorner(client, true);
+            setCorner(client, Corner.START);
          }
 
          while (setEnd.wasPressed()) {
-            setCorner(client, false);
+            setCorner(client, Corner.END);
          }
       });
 
-      // AFTER_ENTITIES, not BEFORE_DEBUG_RENDER: the debug hook sits in the outer render method,
-      // where Fabric never prepares the context, so its matrices and consumers are always null.
+      // Not BEFORE_DEBUG_RENDER: Fabric never prepares that hook's context, so its matrices are null.
       WorldRenderEvents.AFTER_ENTITIES.register(context -> {
-         MinecraftClient minecraftclient = MinecraftClient.getInstance();
+         MinecraftClient client = MinecraftClient.getInstance();
          if (context.matrices() != null
             && context.consumers() != null
-            && minecraftclient.world != null
-            && Selection.matches(minecraftclient.world.getRegistryKey())) {
-            Vec3d vec3d = minecraftclient.gameRenderer.getCamera().getCameraPos();
-            var vertexconsumer = context.consumers().getBuffer(RenderLayers.lines());
-            if (Selection.isComplete()) {
-               BlockPos blockpos = Selection.min();
-               BlockPos blockpos1 = Selection.max();
-               Box box = new Box(
-                  blockpos.getX(), blockpos.getY(), blockpos.getZ(), blockpos1.getX() + 1.0, blockpos1.getY() + 1.0, blockpos1.getZ() + 1.0
+            && client.world != null
+            && Selection.matches(client.world.getRegistryKey())) {
+            Vec3d camera = client.gameRenderer.getCamera().getCameraPos();
+            VertexConsumer lines = context.consumers().getBuffer(RenderLayers.lines());
+            for (Outline outline : outlines()) {
+               VertexRendering.drawOutline(
+                  context.matrices(), lines, VoxelShapes.cuboid(outline.box()), -camera.x, -camera.y, -camera.z, outline.color(), outline.width()
                );
-               draw(context, vertexconsumer, box, vec3d, REGION_COLOR, 3.0F);
-            }
-
-            // The individual corners stay visible on top of the region so it is obvious which one
-            // is which when you are about to move one of them.
-            if (Selection.start != null) {
-               draw(context, vertexconsumer, blockBox(Selection.start), vec3d, START_COLOR, 5.0F);
-            }
-
-            if (Selection.end != null) {
-               draw(context, vertexconsumer, blockBox(Selection.end), vec3d, END_COLOR, 5.0F);
             }
          }
       });
+   }
+
+   private static List<Outline> outlines() {
+      List<Outline> outlines = new ArrayList<>();
+      if (Selection.isComplete()) {
+         BlockPos min = Selection.min();
+         BlockPos max = Selection.max();
+         outlines.add(new Outline(new Box(min.getX(), min.getY(), min.getZ(), max.getX() + 1.0, max.getY() + 1.0, max.getZ() + 1.0), REGION_COLOR, 3.0F));
+      }
+
+      if (Selection.start != null) {
+         outlines.add(new Outline(blockBox(Selection.start), START_COLOR, 5.0F));
+      }
+
+      if (Selection.end != null) {
+         outlines.add(new Outline(blockBox(Selection.end), END_COLOR, 5.0F));
+      }
+
+      return outlines;
    }
 
    private static Box blockBox(BlockPos pos) {
@@ -88,35 +90,14 @@ public final class SelectionRenderer {
       return new Box(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0, pos.getY() + 1.0, pos.getZ() + 1.0).expand(0.002);
    }
 
-   private static void draw(
-      net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext context,
-      net.minecraft.client.render.VertexConsumer consumer,
-      Box box,
-      Vec3d camera,
-      int color,
-      float width
-   ) {
-      VertexRendering.drawOutline(
-         context.matrices(), consumer, VoxelShapes.cuboid(box), -camera.x, -camera.y, -camera.z, color, width
-      );
+   private static void setCorner(MinecraftClient client, Corner corner) {
+      if (client.player != null && client.world != null) {
+         BlockPos pos = MeshifyActions.targetedBlock(client);
+         Selection.set(corner, pos, client.world.getRegistryKey());
+         client.player.sendMessage(MeshifyActions.cornerSetMessage(corner, pos), true);
+      }
    }
 
-   private static void setCorner(MinecraftClient client, boolean isStart) {
-      if (client.player != null && client.world != null) {
-         // Whatever the crosshair is on, falling back to the block underfoot when aiming at nothing.
-         BlockPos blockpos = client.crosshairTarget instanceof BlockHitResult blockhitresult
-               && client.crosshairTarget.getType() == HitResult.Type.BLOCK
-            ? blockhitresult.getBlockPos()
-            : client.player.getBlockPos();
-         Selection.set(isStart, blockpos, client.world.getRegistryKey());
-         Text text = Text.translatable(isStart ? "meshify.label.start" : "meshify.label.end");
-         client.player
-            .sendMessage(
-               Selection.isComplete()
-                  ? Text.translatable("meshify.msg.pos_set_volume", text, blockpos.toShortString(), Selection.volume())
-                  : Text.translatable("meshify.msg.pos_set", text, blockpos.toShortString()),
-               true
-            );
-      }
+   private record Outline(Box box, int color, float width) {
    }
 }

@@ -30,7 +30,6 @@ public final class BoxUv {
       emit(mesh, tex, bx, by, bz, x0, y0, z0, x1, y1, z1, u0, v0, texW, texH, yawDeg, pivotX, pivotZ, inflate, false);
    }
 
-   /** @see #emit(MeshBuilder, TexKey, double, double, double, double, double, double, double, double, double, int, int, int, int, int, int, int, double, double, double, double, Direction, boolean) */
    public static void emit(
       MeshBuilder mesh,
       TexKey tex,
@@ -136,13 +135,7 @@ public final class BoxUv {
       emit(mesh, tex, bx, by, bz, x0, y0, z0, x1, y1, z1, u0, v0, sx, sy, sz, texW, texH, yawDeg, pivotX, pivotZ, inflate, up, false);
    }
 
-   /**
-    * Minecraft unwraps every cuboid the same way, but most block-entity models are drawn through a
-    * renderer that rotates them 180° about Z (skulls, shulker boxes), which puts the sheet's
-    * top/bottom and left/right halves the other way round from block space. Models the game draws
-    * upright — the chest — need {@code upright} set: without it the lid shows its dark underside
-    * ("a shadow on top") and a double chest picks the wrong end cap, which is transparent.
-    */
+   /** Most block-entity renderers turn the model 180° about Z; pass {@code upright} for ones that don't, like the chest. */
    public static void emit(
       MeshBuilder mesh,
       TexKey tex,
@@ -184,9 +177,7 @@ public final class BoxUv {
       float[][] afloat4 = uv(texW, texH, u0 + sz + sx, v0, u0 + sz, v0, u0 + sz, v0 + sz, u0 + sz + sx, v0 + sz);
       float[][] afloat5 = uv(texW, texH, u0 + sz + sx, v0, u0 + sz + 2 * sx, v0, u0 + sz + 2 * sx, v0 + sz, u0 + sz + sx, v0 + sz);
       if (upright) {
-         // The 180° turn keeps every face on its own side of the box, so it only re-reads the
-         // sheet: the two side halves trade places (and roll over with the flip), the depth faces
-         // roll over in place, and the top and bottom halves trade places.
+         // The 180° turn keeps every face on its side of the box, so only the sheet lookup changes.
          afloat = rotate180(afloat);
          afloat1 = rotate180(afloat1);
          float[][] afloat6 = afloat2;
@@ -228,13 +219,9 @@ public final class BoxUv {
       return new float[][]{uv[2], uv[3], uv[0], uv[1]};
    }
 
-   // ---------------------------------------------------------------- self-check
-
    /** Run with {@code gradlew boxUvCheck}. */
    public static void main(String[] args) {
-      // The double-chest base: every column of the 64x64 unwrap is a different width, so a face
-      // reading the wrong one cannot pass by coincidence. Columns are 0-14, 14-29, 29-43, 43-58,
-      // and the top row splits 14-29 / 29-44.
+      // Every column of the 64x64 double-chest unwrap has a different width, so a wrong face can't pass by chance.
       check(uSpan(false, 0.0F, 1.0F, 0.0F), new float[]{14.0F, 29.0F}, "default top face");
       check(uSpan(false, 1.0F, 0.0F, 0.0F), new float[]{0.0F, 14.0F}, "default east face");
       check(uSpan(true, 0.0F, 1.0F, 0.0F), new float[]{29.0F, 44.0F}, "upright top face");
@@ -255,7 +242,6 @@ public final class BoxUv {
       return meshbuilder;
    }
 
-   /** The horizontal texture span, in sheet pixels, of the face pointing along {@code normal}. */
    private static float[] uSpan(boolean upright, float nx, float ny, float nz) {
       for (MeshBuilder.Quad meshbuilder$quad : box(upright).quads().values().iterator().next()) {
          float[] afloat = meshbuilder$quad.normal();

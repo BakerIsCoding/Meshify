@@ -10,19 +10,29 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 
 public final class Selection {
    public static BlockPos start;
    public static BlockPos end;
-   /** The world both corners were placed in; a region spanning two dimensions is meaningless. */
    public static RegistryKey<World> dimension;
-   /** Last option string used for an export, reused when the next one omits it. */
    public static String lastOptions = "";
 
    private static Path file;
 
    private Selection() {
+   }
+
+   public enum Corner {
+      START("meshify.label.start"),
+      END("meshify.label.end");
+
+      public final String labelKey;
+
+      Corner(String labelKey) {
+         this.labelKey = labelKey;
+      }
    }
 
    public static boolean isComplete() {
@@ -36,16 +46,15 @@ public final class Selection {
       save();
    }
 
-   public static void set(boolean isStart, BlockPos pos, RegistryKey<World> world) {
-      // Corners from two different dimensions describe nothing, so the second one wins and the
-      // stale corner is dropped rather than silently exporting a garbage region.
+   public static void set(Corner corner, BlockPos pos, RegistryKey<World> world) {
+      // Corners from different dimensions describe nothing, so the stale one is dropped.
       if (dimension != null && !dimension.equals(world)) {
          start = null;
          end = null;
       }
 
       dimension = world;
-      if (isStart) {
+      if (corner == Corner.START) {
          start = pos;
       } else {
          end = pos;
@@ -66,6 +75,12 @@ public final class Selection {
       return new BlockPos(Math.max(start.getX(), end.getX()), Math.max(start.getY(), end.getY()), Math.max(start.getZ(), end.getZ()));
    }
 
+   /** The region's size along X, Y and Z, e.g. {@code 32×18×40}. */
+   public static String dimensions() {
+      BlockPos size = max().subtract(min()).add(1, 1, 1);
+      return size.getX() + "×" + size.getY() + "×" + size.getZ();
+   }
+
    public static long volume() {
       if (!isComplete()) {
          return 0L;
@@ -84,9 +99,20 @@ public final class Selection {
       int[] aint = axis(blockpos.getX(), blockpos1.getX(), n);
       int[] aint1 = axis(blockpos.getY(), blockpos1.getY(), n);
       int[] aint2 = axis(blockpos.getZ(), blockpos1.getZ(), n);
-      start = new BlockPos(aint[0], aint1[0], aint2[0]);
-      end = new BlockPos(aint[1], aint1[1], aint2[1]);
-      save();
+      setBounds(new BlockPos(aint[0], aint1[0], aint2[0]), new BlockPos(aint[1], aint1[1], aint2[1]));
+   }
+
+   /** Moves only the {@code side} face; shrinking stops at the opposite face so it never turns inside out. */
+   public static void expand(int n, Direction side) {
+      BlockPos lo = min();
+      BlockPos hi = max();
+      Direction.Axis axis = side.getAxis();
+      int shift = Math.max(n, lo.getComponentAlongAxis(axis) - hi.getComponentAlongAxis(axis));
+      if (side.getDirection() == Direction.AxisDirection.POSITIVE) {
+         setBounds(lo, hi.offset(side, shift));
+      } else {
+         setBounds(lo.offset(side, shift), hi);
+      }
    }
 
    /** Shrinking past the middle would flip the axis, so it collapses to a single block instead. */
@@ -102,8 +128,12 @@ public final class Selection {
    }
 
    public static void expandVertical(int bottomY, int topY) {
-      start = new BlockPos(min().getX(), bottomY, min().getZ());
-      end = new BlockPos(max().getX(), topY, max().getZ());
+      setBounds(new BlockPos(min().getX(), bottomY, min().getZ()), new BlockPos(max().getX(), topY, max().getZ()));
+   }
+
+   public static void setBounds(BlockPos lo, BlockPos hi) {
+      start = lo;
+      end = hi;
       save();
    }
 
@@ -112,14 +142,9 @@ public final class Selection {
       save();
    }
 
-   // ---------------------------------------------------------------- persistence
-
-   /**
-    * Keeps the selection across restarts. A {@link Properties} file rather than JSON: it is five
-    * fields and the stdlib already reads and writes this format.
-    */
-   public static void init(Path runDir) {
-      file = runDir.resolve("meshify").resolve("session.properties");
+   /** Keeps the selection across restarts in a Properties file: five fields need no JSON. */
+   public static void init(Path dir) {
+      file = dir.resolve("session.properties");
       if (Files.exists(file)) {
          Properties properties = new Properties();
 
@@ -184,6 +209,28 @@ public final class Selection {
    private static void writePos(Properties props, String prefix, BlockPos pos) {
       if (pos != null) {
          props.setProperty(prefix, pos.getX() + "," + pos.getY() + "," + pos.getZ());
+      }
+   }
+
+   /** Self-check, run with {@code gradlew selectionCheck}; never calls {@link #init}, so it writes no file. */
+   public static void main(String[] args) {
+      start = new BlockPos(0, 0, 0);
+      end = new BlockPos(9, 4, 9);
+      expand(3, Direction.UP);
+      check(min().getY() == 0 && max().getY() == 7, "growing up moves only the top face");
+      expand(-2, Direction.WEST);
+      check(min().getX() == 2 && max().getX() == 9, "shrinking west pulls the west face in");
+      expand(-100, Direction.NORTH);
+      check(min().getZ() == 9 && max().getZ() == 9, "shrinking stops at the opposite face");
+      expand(-100, Direction.DOWN);
+      check(min().getY() == 7 && max().getY() == 7, "shrinking from below stops at the top face");
+      check(dimensions().equals("8×1×1"), "dimensions reads X×Y×Z");
+      System.out.println("Selection self-check passed");
+   }
+
+   private static void check(boolean ok, String what) {
+      if (!ok) {
+         throw new AssertionError("Selection self-check failed: " + what);
       }
    }
 }
