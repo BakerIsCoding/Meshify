@@ -1,4 +1,4 @@
-<img src="src/main/resources/assets/meshify/icon.png" alt="Meshify icon" width="97" align="right">
+<img src="src/main/resources/assets/meshify/icon.png" alt="Meshify icon" width="96" align="right">
 
 # Meshify
 
