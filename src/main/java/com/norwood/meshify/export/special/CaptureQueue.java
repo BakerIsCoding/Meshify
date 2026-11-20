@@ -23,6 +23,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+//? if >=26.2 <26.4 {
+/*import java.util.function.Function;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+*///?}
+//? if >=26.1 <26.4
+//import net.fabricmc.fabric.api.client.renderer.v1.mesh.Mesh;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font.DisplayMode;
 import net.minecraft.client.model.Model;
@@ -332,10 +338,14 @@ final class CaptureQueue implements SubmitNodeCollector {
    public void submitBlockModel(
       PoseStack matrices, RenderType renderLayer, List<BlockStateModelPart> parts, int[] tintLayers, int light, int overlay, int outlineColor
    ) {
+      this.emitParts(matrices, parts, tintLayers);
+   }
+
+   private void emitParts(PoseStack matrices, List<BlockStateModelPart> parts, int[] tintLayers) {
       for (BlockStateModelPart part : parts) {
          for (Direction face : RegionExporter.QUAD_FACES) {
             for (BakedQuad quad : part.getQuads(face)) {
-               this.emitBakedQuad(matrices, quad, layerTint(tintLayers, quad));
+               this.emitBakedQuad(matrices, quad, layerTint(tintLayers, BakedQuads.tintIndex(quad)));
             }
          }
       }
@@ -365,6 +375,59 @@ final class CaptureQueue implements SubmitNodeCollector {
       }
    }
    //?}
+
+   //? if >=26.2 <26.4 {
+   /*// With Fabric API's renderer loaded, block models (the item frame's frame among them) arrive here instead.
+   @Override
+   public void submitBlockModel(
+      PoseStack matrices,
+      Function<ChunkSectionLayer, RenderType> renderTypes,
+      boolean translucent,
+      List<BlockStateModelPart> parts,
+      Mesh mesh,
+      int[] tintLayers,
+      int light,
+      int overlay,
+      int outlineColor
+   ) {
+      this.emitFabricBlockModel(matrices, parts, mesh, tintLayers);
+   }
+   *///?} elif >=26.1 <26.2 {
+   /*// With Fabric API's renderer loaded, block models (the item frame's frame among them) arrive here instead.
+   @Override
+   public void submitBlockModel(
+      PoseStack matrices, RenderType renderLayer, List<BlockStateModelPart> parts, Mesh mesh, int[] tintLayers, int light, int overlay, int outlineColor
+   ) {
+      this.emitFabricBlockModel(matrices, parts, mesh, tintLayers);
+   }
+   *///?}
+   //? if >=26.1 <26.4 {
+   /*private void emitFabricBlockModel(PoseStack matrices, List<BlockStateModelPart> parts, Mesh mesh, int[] tintLayers) {
+      this.emitParts(matrices, parts, tintLayers);
+      if (mesh == null) {
+         return;
+      }
+
+      // Mesh quads carry block atlas UVs but no sprite, so the sprite is looked up by UV.
+      Matrix4f matrix = matrices.last().pose();
+      mesh.forEach(quad -> {
+         float[][] positions = new float[4][];
+         float[][] uv = new float[4][];
+
+         for (int k = 0; k < 4; k++) {
+            Vector4f vertex = matrix.transform(new Vector4f(quad.x(k), quad.y(k), quad.z(k), 1.0F));
+            positions[k] = new float[]{vertex.x(), vertex.y(), vertex.z()};
+            uv[k] = new float[]{quad.u(k), quad.v(k)};
+         }
+
+         TextureKey texture = this.resolveAtlas(TextureAtlas.LOCATION_BLOCKS, uv, layerTint(tintLayers, quad.tintIndex()));
+         if (texture != null) {
+            Vector3f normal = matrices.last().transformNormal(new Vector3f(quad.faceNormal()), new Vector3f());
+            this.capture(texture, positions, uv, new float[]{normal.x(), normal.y(), normal.z()});
+         }
+      });
+   }
+   *///?}
 
    // The block breaking overlay is not geometry.
    //? if >=26.3 {
@@ -401,13 +464,12 @@ final class CaptureQueue implements SubmitNodeCollector {
       /*for (BakedQuad quad : quads.all()) {
       *///?} else
       for (BakedQuad quad : quads) {
-         this.emitBakedQuad(matrices, quad, layerTint(tintLayers, quad));
+         this.emitBakedQuad(matrices, quad, layerTint(tintLayers, BakedQuads.tintIndex(quad)));
       }
    }
 
    // The colour the renderer gave the quad's tint layer, or -1 when the quad is not tinted.
-   private static int layerTint(int[] tintLayers, BakedQuad quad) {
-      int layer = BakedQuads.tintIndex(quad);
+   private static int layerTint(int[] tintLayers, int layer) {
       return layer >= 0 && tintLayers != null && layer < tintLayers.length ? tintLayers[layer] : -1;
    }
 
