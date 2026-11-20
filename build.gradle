@@ -52,6 +52,15 @@ dependencies {
 	add(modConfiguration, "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}")
 }
 
+// In-game test in src/gametest: ./gradlew :<version>:runClientGameTest starts a real client and exports a scene.
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = 'meshify-gametest'
+		enableGameTests = false
+	}
+}
+
 processResources {
 	def metadata = [version: version, minecraft: minecraft_range, fabricApi: findProperty('fabric_api_range') ?: '*', java: javaVersion]
 	inputs.properties metadata

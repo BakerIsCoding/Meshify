@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "meshify-gametest",
+  "version": "1.0.0",
+  "name": "Meshify in-game test",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": ["com.norwood.meshify.MeshifyClientGameTest"]
+  },
+  "depends": {
+    "meshify": "*"
+  }
+}

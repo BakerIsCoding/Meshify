@@ -165,8 +165,11 @@ All versions share the code in `src/` through [Stonecutter](https://stonecutter.
 | `./gradlew boxUvCheck` | Checks the cuboid texture unwrap, upright and flipped. |
 | `./gradlew selectionCheck` | Checks resizing the selection and its volume. |
 | `./gradlew optionsCheck` | Checks that menu choices survive the round trip through the option string. |
+| `./gradlew runClientGameTest --no-parallel` | Starts the real game once per version, builds a test scene, exports it three ways with `/meshify export` and checks the files. |
 
 The checks are plain `main` methods, so the project has no test dependency. Without a version prefix they run once per version. Please run them before opening a pull request.
+
+The in-game test lives in `src/gametest` and uses Fabric's client game tests. It places one block or entity for each exporter (chest, sign, banner, bed, heads, shulker box, bell, decorated pot, conduit, enchanting table, water, armor stand, pig, item frame), exports with the default options, with `separate 2` and with `bake weld cull`, and fails if a block is skipped, a warning comes up, the counts change, a face points at missing data, a texture file is missing or an exporter's texture is absent from the OBJ. It opens a game window for each version and takes about 20 seconds per version. Without `--no-parallel`, Gradle starts every version's game at the same time. To test one version, use `./gradlew :26.3:runClientGameTest`.
 
 ## Credits
 
