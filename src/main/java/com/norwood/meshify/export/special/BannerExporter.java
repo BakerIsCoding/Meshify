@@ -8,6 +8,8 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
+//? if >=26.4
+//import net.minecraft.util.CommonColors;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.AbstractBannerBlock;
@@ -60,6 +62,14 @@ public final class BannerExporter {
       }
    }
 
+   // 26.4 moved the dye colours out of DyeColor into a lookup table.
+   private static int tint(DyeColor color) {
+      //? if >=26.4 {
+      /*return CommonColors.TEXTURE_TINT_COLORS.pick(color) & 0xFFFFFF;
+      *///?} else
+      return color.getTextureDiffuseColor() & 0xFFFFFF;
+   }
+
    // The banner base dyed its colour, with each pattern layer painted on top in its own colour.
    private static TextureKey buildTexture(BlockGetter world, BlockPos pos, DyeColor baseColor) {
       List<TextureKey.CompositeLayer> layers = new ArrayList<>();
@@ -67,14 +77,14 @@ public final class BannerExporter {
       /*layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner/banner_base.png"), -1));
       *///?} else
       layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner_base.png"), -1));
-      layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner/base.png"), baseColor.getTextureDiffuseColor() & 0xFFFFFF));
+      layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner/base.png"), tint(baseColor)));
       StringBuilder patterns = new StringBuilder();
       if (world.getBlockEntity(pos) instanceof BannerBlockEntity banner) {
          for (Layer layer : banner.getPatterns().layers()) {
             Identifier asset = layer.pattern().value().assetId();
             layers.add(
                new TextureKey.CompositeLayer(
-                  Identifier.fromNamespaceAndPath(asset.getNamespace(), "textures/entity/banner/" + asset.getPath() + ".png"), layer.color().getTextureDiffuseColor() & 0xFFFFFF
+                  Identifier.fromNamespaceAndPath(asset.getNamespace(), "textures/entity/banner/" + asset.getPath() + ".png"), tint(layer.color())
                )
             );
             patterns.append(asset).append('#').append(layer.color().getName()).append(';');

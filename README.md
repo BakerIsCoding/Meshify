@@ -50,12 +50,12 @@ The files land in `meshify/castle/` inside the game directory (`.minecraft` for 
 
 | Requirement | Version |
 | --- | --- |
-| Minecraft | 1.21.10, 1.21.11, 26.1 to 26.1.2, 26.2, 26.3 |
-| Fabric Loader | 0.17.0 or newer |
+| Minecraft | 1.21.10, 1.21.11, 26.1 to 26.1.2, 26.2, 26.3, 26.4 snapshots (built for 26.4-snapshot-10) |
+| Fabric Loader | 0.17.0 or newer, 0.20.0 or newer on 26.4 |
 | Fabric API | 0.137.0 or newer on 1.21.10, any build on the rest |
 | Java | 21 on 1.21.x, 25 on 26.x |
 
-Each Minecraft version has its own jar, named after it. The 26.1 jar also runs on 26.1.1 and 26.1.2.
+Each Minecraft version has its own jar, named after it. The 26.1 jar also runs on 26.1.1 and 26.1.2. The 26.4 jar is built against a snapshot, so a newer snapshot may break it.
 
 Meshify only runs on the client. There is no prebuilt release yet, so build the jar from source as described in [Development](#development) and drop it into `mods` next to Fabric API.
 

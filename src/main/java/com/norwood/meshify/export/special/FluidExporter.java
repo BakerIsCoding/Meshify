@@ -126,6 +126,9 @@ public final class FluidExporter {
    }
 
    private static boolean sameFluid(ClientLevel world, BlockPos pos, FluidState fluid) {
+      //? if >=26.4 {
+      /*return world.getFluidState(pos).is(fluid.getType());
+      *///?} else
       return world.getFluidState(pos).getType().isSame(fluid.getType());
    }
 

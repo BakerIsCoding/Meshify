@@ -318,7 +318,9 @@ final class MeshifyScreen extends Screen {
 
    // Only a dim panel behind the menu: no blur, so the selection outline stays sharp.
    @Override
-   //? if >=26.1 {
+   //? if >=26.4 {
+   /*public void extractBackground(GuiGraphicsExtractor context) {
+   *///?} elif >=26.1 {
    /*public void extractBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
    *///?} else
    public void renderBackground(GuiGraphics context, int mouseX, int mouseY, float delta) {
@@ -332,7 +334,10 @@ final class MeshifyScreen extends Screen {
    }
 
    @Override
-   //? if >=26.1 {
+   //? if >=26.4 {
+   /*public void extractRenderState(GuiGraphicsExtractor context) {
+      super.extractRenderState(context);
+   *///?} elif >=26.1 {
    /*public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
       super.extractRenderState(context, mouseX, mouseY, delta);
    *///?} else {

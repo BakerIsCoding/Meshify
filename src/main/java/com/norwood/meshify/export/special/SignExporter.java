@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.BiFunction;
 import net.minecraft.client.Minecraft;
+//? if >=26.4
+//import net.minecraft.client.renderer.blockentity.AbstractSignRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -213,6 +215,9 @@ public final class SignExporter {
          warnings.add(warning);
       }
 
+      //? if >=26.4 {
+      /*int rgb = AbstractSignRenderer.BRIGHT_TEXT_COLORS.pick(signText.getColor()) & 0xFFFFFF;
+      *///?} else
       int rgb = signText.getColor().getTextColor() & 0xFFFFFF;
       String id = String.format(Locale.ROOT, "sign_text_%08x_%06x", allLines.toString().hashCode(), rgb);
       return TextureKey.generated(id, ignored -> FontRaster.render(lines, rgb, TEXT_WIDTH, TEXT_HEIGHT));
