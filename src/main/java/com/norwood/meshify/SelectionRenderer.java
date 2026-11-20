@@ -29,14 +29,14 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 
-/** The corner keys and the in-world outline of the selection. */
+// The corner keys and the in-world outline of the selection.
 public final class SelectionRenderer {
    private static final int START_COLOR = 0xFF55FF55;
    private static final int END_COLOR = 0xFFFF5555;
    private static final int REGION_COLOR = 0xFF55FFFF;
    private static final float REGION_LINE_WIDTH = 3.0F;
    private static final float CORNER_LINE_WIDTH = 5.0F;
-   /** Grows the corner outlines just past the region's, so the two never z-fight. */
+   // Grows the corner outlines just past the region's, so the two never z-fight.
    private static final double CORNER_NUDGE = 0.002;
 
    private static KeyMapping setStartKey;
@@ -135,7 +135,7 @@ public final class SelectionRenderer {
       return outlines;
    }
 
-   /** The keys report on the action bar, which stays out of the chat while the player sets corners by eye. */
+   // The keys report on the action bar, which stays out of the chat while the player sets corners by eye.
    private static void setCorner(Minecraft client, Corner corner) {
       if (client.player != null && client.level != null) {
          Consumer<Component> actionBar = text -> client.player.displayClientMessage(text, true);

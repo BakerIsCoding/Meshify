@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 //? if >=1.21.11 {
 @Mixin(RenderSetup.class)
 public interface RenderSetupAccessor {
-   /** Values are the package-private RenderSetup.TextureBinding; read them through {@link TextureBindingAccessor}. */
+   // Values are the package-private RenderSetup.TextureBinding; read them through TextureBindingAccessor.
    @Accessor("textures")
    Map<String, ?> meshify$getTextures();
 }

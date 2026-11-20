@@ -23,11 +23,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.sounds.SoundEvents;
 
-/** The running export: scans a slice per client tick, then writes the files on a background thread. */
+// The running export: scans a slice per client tick, then writes the files on a background thread.
 final class ExportJob {
-   /** About half of a 50 ms tick; raise it for faster exports at a lower frame rate. */
+   // About half of a 50 ms tick; raise it for faster exports at a lower frame rate.
    private static final long SCAN_BUDGET_NANOS = 25_000_000L;
-   /** Below this much of the scan, the time left swings too much to be worth showing. */
+   // Below this much of the scan, the time left swings too much to be worth showing.
    private static final double MIN_PROGRESS_FOR_ETA = 0.02;
    private static final SystemToast.SystemToastId TOAST_TYPE = new SystemToast.SystemToastId();
 
@@ -39,7 +39,7 @@ final class ExportJob {
    private final long startNanos = System.nanoTime();
    private volatile boolean cancelled;
    private volatile ExportStage stage;
-   /** Client-thread only: set once the scan has handed over to the writer thread. */
+   // Client-thread only: set once the scan has handed over to the writer thread.
    private boolean writing;
 
    private ExportJob(Minecraft client, RegionExporter.Scanner scanner, ExportOptions options) {
@@ -140,7 +140,7 @@ final class ExportJob {
       this.client.gui.setOverlayMessage(Component.empty(), false);
    }
 
-   /** Runs on the writer thread before each step, so cancelling throws here. */
+   // Runs on the writer thread before each step, so cancelling throws here.
    private void enterStage(ExportStage next) {
       if (this.cancelled) {
          throw new CancellationException();
@@ -161,7 +161,7 @@ final class ExportJob {
       }
    }
 
-   /** Null only in the moment between the scan ending and the writer thread reaching its first step. */
+   // Null only in the moment between the scan ending and the writer thread reaching its first step.
    private Component progressText() {
       if (!this.writing) {
          double progress = this.scanner.progress();
@@ -257,7 +257,7 @@ final class ExportJob {
       return Component.translatable("meshify.error.failed", String.valueOf(exception)).withStyle(ChatFormatting.RED);
    }
 
-   /** Deleting the whole folder is safe: {@code MeshifyActions#uniqueName} never reuses one. */
+   // Deleting the whole folder is safe: MeshifyActions.uniqueName never reuses one.
    private static void deleteQuietly(Path dir) {
       if (!Files.exists(dir)) {
          return;

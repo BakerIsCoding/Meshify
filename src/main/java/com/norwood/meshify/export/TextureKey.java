@@ -15,6 +15,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 
 public abstract class TextureKey {
+   private static final int SKIN_HASH_CHARS = 12;
    private final String id;
    private final boolean preScaled;
 
@@ -41,7 +42,7 @@ public abstract class TextureKey {
       return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "_").replaceAll("^_+|_+$", "");
    }
 
-   /** A tint's RGB, or -1 for none; white multiplies by one, so it is no tint either. */
+   // A tint's RGB, or -1 for none; white multiplies by one, so it is no tint either.
    public static int normalizeTint(int argb) {
       int rgb = argb & 0xFFFFFF;
       return rgb == 0xFFFFFF ? -1 : rgb;
@@ -50,11 +51,10 @@ public abstract class TextureKey {
    public static TextureKey sprite(TextureAtlasSprite sprite, int tint) {
       int rgb = normalizeTint(tint);
       Identifier id = sprite.contents().name();
-      String name = id.getNamespace().equals("minecraft") ? id.getPath() : id.getNamespace() + "_" + id.getPath();
-      return new TextureKey.SpriteKey(sanitize(name) + tintSuffix(rgb), sprite, rgb);
+      return new TextureKey.SpriteKey(sanitize(namespaced(id, id.getPath())) + tintSuffix(rgb), sprite, rgb);
    }
 
-   /** An atlas UV restated within {@code sprite}'s own 0..1 square. */
+   // An atlas UV restated within sprite's own 0..1 square.
    public static float[] spriteUv(TextureAtlasSprite sprite, float u, float v) {
       float spanU = sprite.getU1() - sprite.getU0();
       float spanV = sprite.getV1() - sprite.getV0();
@@ -68,7 +68,7 @@ public abstract class TextureKey {
       return new TextureKey.ResourceKey(resourceName(pngPath), pngPath);
    }
 
-   /** A resource texture multiplied by {@code tint}, or the plain one when there is no tint. */
+   // A resource texture multiplied by tint, or the plain one when there is no tint.
    public static TextureKey resource(Identifier pngPath, int tint) {
       int rgb = normalizeTint(tint);
       return rgb < 0 ? resource(pngPath) : composite(resourceName(pngPath) + tintSuffix(rgb), List.of(new TextureKey.CompositeLayer(pngPath, rgb)));
@@ -76,7 +76,12 @@ public abstract class TextureKey {
 
    private static String resourceName(Identifier pngPath) {
       String name = pngPath.getPath().replaceAll("^textures/", "").replaceAll("\\.png$", "");
-      return sanitize(pngPath.getNamespace().equals("minecraft") ? name : pngPath.getNamespace() + "_" + name);
+      return sanitize(namespaced(pngPath, name));
+   }
+
+   // Vanilla names stay bare; a mod's get its namespace in front so two mods can't collide.
+   private static String namespaced(Identifier id, String name) {
+      return id.getNamespace().equals("minecraft") ? name : id.getNamespace() + "_" + name;
    }
 
    private static String tintSuffix(int rgb) {
@@ -85,8 +90,8 @@ public abstract class TextureKey {
 
    public static TextureKey playerSkin(String url) {
       String file = url.substring(url.lastIndexOf('/') + 1);
-      if (file.length() > 12) {
-         file = file.substring(0, 12);
+      if (file.length() > SKIN_HASH_CHARS) {
+         file = file.substring(0, SKIN_HASH_CHARS);
       }
 
       return new TextureKey.SkinKey("player_skin_" + sanitize(file), url);
@@ -109,7 +114,7 @@ public abstract class TextureKey {
       return new TextureKey.CompositeKey(id, layers);
    }
 
-   /** Reads a PNG from the loaded resource packs. */
+   // Reads a PNG from the loaded resource packs.
    static NativeImage readResource(Minecraft client, Identifier pngPath) throws IOException {
       Resource resource = client.getResourceManager().getResource(pngPath).orElseThrow(() -> new IOException("resource not found: " + pngPath));
 
@@ -118,13 +123,14 @@ public abstract class TextureKey {
       }
    }
 
-   static NativeImage copyRegion(NativeImage src, int x, int y, int w, int h, int tint) {
+   // Copies the top-left width x height of src, multiplied by tint.
+   static NativeImage copyRegion(NativeImage src, int width, int height, int tint) {
       float[] factor = tintFactors(tint);
-      NativeImage copy = new NativeImage(w, h, false);
+      NativeImage copy = new NativeImage(width, height, false);
 
-      for (int row = 0; row < h; row++) {
-         for (int col = 0; col < w; col++) {
-            int argb = src.getPixel(x + col, y + row);
+      for (int row = 0; row < height; row++) {
+         for (int col = 0; col < width; col++) {
+            int argb = src.getPixel(col, row);
             int red = (int)((argb >> 16 & 0xFF) * factor[0]);
             int green = (int)((argb >> 8 & 0xFF) * factor[1]);
             int blue = (int)((argb & 0xFF) * factor[2]);
@@ -135,7 +141,7 @@ public abstract class TextureKey {
       return copy;
    }
 
-   /** A tint's red, green and blue as 0..1 multipliers; all ones for no tint. */
+   // A tint's red, green and blue as 0..1 multipliers; all ones for no tint.
    private static float[] tintFactors(int tint) {
       return tint < 0
          ? new float[]{1.0F, 1.0F, 1.0F}
@@ -159,7 +165,7 @@ public abstract class TextureKey {
 
             try {
                if (result == null) {
-                  result = copyRegion(image, 0, 0, image.getWidth(), image.getHeight(), layer.tint());
+                  result = copyRegion(image, image.getWidth(), image.getHeight(), layer.tint());
                } else {
                   blend(result, image, layer.tint());
                }
@@ -175,26 +181,26 @@ public abstract class TextureKey {
          return result;
       }
 
-      /** Draws {@code src}, tinted, over {@code dst} with ordinary alpha blending. */
+      // Draws src, tinted, over dst with ordinary alpha blending.
       private static void blend(NativeImage dst, NativeImage src, int tint) {
          float[] factor = tintFactors(tint);
-         int w = Math.min(dst.getWidth(), src.getWidth());
-         int h = Math.min(dst.getHeight(), src.getHeight());
+         int width = Math.min(dst.getWidth(), src.getWidth());
+         int height = Math.min(dst.getHeight(), src.getHeight());
 
-         for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
+         for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
                int top = src.getPixel(x, y);
                int topAlpha = top >>> 24;
                if (topAlpha == 0) {
                   continue;
                }
 
-               float a = topAlpha / 255.0F;
+               float opacity = topAlpha / 255.0F;
                int bottom = dst.getPixel(x, y);
-               int red = (int)((top >> 16 & 0xFF) * factor[0] * a + (bottom >> 16 & 0xFF) * (1.0F - a));
-               int green = (int)((top >> 8 & 0xFF) * factor[1] * a + (bottom >> 8 & 0xFF) * (1.0F - a));
-               int blue = (int)((top & 0xFF) * factor[2] * a + (bottom & 0xFF) * (1.0F - a));
-               int alpha = Math.min(255, (int)(topAlpha + (bottom >>> 24) * (1.0F - a)));
+               int red = (int)((top >> 16 & 0xFF) * factor[0] * opacity + (bottom >> 16 & 0xFF) * (1.0F - opacity));
+               int green = (int)((top >> 8 & 0xFF) * factor[1] * opacity + (bottom >> 8 & 0xFF) * (1.0F - opacity));
+               int blue = (int)((top & 0xFF) * factor[2] * opacity + (bottom & 0xFF) * (1.0F - opacity));
+               int alpha = Math.min(255, (int)(topAlpha + (bottom >>> 24) * (1.0F - opacity)));
                dst.setPixel(x, y, alpha << 24 | red << 16 | green << 8 | blue);
             }
          }
@@ -269,7 +275,7 @@ public abstract class TextureKey {
          }
       }
 
-      /** Pads a pre-1.8 64x32 skin to the square layout the head UVs assume. */
+      // Pads a pre-1.8 64x32 skin to the square layout the head UVs assume.
       private static NativeImage expandLegacy(NativeImage src) {
          NativeImage expanded = new NativeImage(SKIN_SIZE, SKIN_SIZE, false);
 
@@ -298,9 +304,9 @@ public abstract class TextureKey {
          SpriteContents contents = this.sprite.contents();
          NativeImage image = ((SpriteContentsAccessor)contents).meshify$getImage();
          // Animated sprites stack their frames below the first; only the first is copied.
-         int w = Math.min(contents.width(), image.getWidth());
-         int h = Math.min(contents.height(), image.getHeight());
-         return copyRegion(image, 0, 0, w, h, this.tint);
+         int width = Math.min(contents.width(), image.getWidth());
+         int height = Math.min(contents.height(), image.getHeight());
+         return copyRegion(image, width, height, this.tint);
       }
    }
 }

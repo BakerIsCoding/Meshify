@@ -32,19 +32,21 @@ final class MeshifyScreen extends Screen {
    private static final int COLUMN_GAP = 12;
    private static final int BUTTON_GAP = 4;
    private static final int HALF_BUTTON_WIDTH = (COLUMN_WIDTH - BUTTON_GAP) / 2;
-   /** Where the second of two half-width buttons starts, from its column's left edge. */
+   // Where the second of two half-width buttons starts, from its column's left edge.
    private static final int SECOND_HALF_OFFSET = HALF_BUTTON_WIDTH + BUTTON_GAP;
    private static final int BUTTON_HEIGHT = 20;
    private static final int AMOUNT_FIELD_WIDTH = 40;
+   private static final int AMOUNT_MAX_DIGITS = 4;
+   private static final int NAME_MAX_LENGTH = 64;
    private static final int ROW_HEIGHT = 24;
    private static final int LINE_HEIGHT = 10;
    private static final int HEADINGS_TOP = 14;
    private static final int COLUMNS_TOP = 28;
-   /** Where the selection buttons start, under the four lines describing the selection. */
+   // Where the selection buttons start, under the four lines describing the selection.
    private static final int SELECTION_BUTTONS_TOP = COLUMNS_TOP + 4 * LINE_HEIGHT + 4;
    private static final int STATUS_TOP = 194;
    private static final int STATUS_LINES = 2;
-   /** Title, both columns, the status lines and the bottom buttons; fits a 240-pixel-tall GUI. */
+   // Title, both columns, the status lines and the bottom buttons; fits a 240-pixel-tall GUI.
    private static final int CONTENT_HEIGHT = 236;
    private static final int PANEL_PADDING = 6;
    private static final int PANEL_COLOR = 0x90000000;
@@ -130,7 +132,7 @@ final class MeshifyScreen extends Screen {
       EditBox amountField = this.filteredEditBox(
          this.leftColumnX, y, AMOUNT_FIELD_WIDTH, Component.translatable("meshify.gui.amount"), text -> text.chars().allMatch(Character::isDigit)
       );
-      amountField.setMaxLength(4);
+      amountField.setMaxLength(AMOUNT_MAX_DIGITS);
       amountField.setValue(this.amount);
       amountField.setResponder(text -> this.amount = text);
       amountField.setTooltip(Tooltip.create(Component.translatable("meshify.gui.amount")));
@@ -174,7 +176,7 @@ final class MeshifyScreen extends Screen {
       EditBox nameField = this.filteredEditBox(
          this.rightColumnX, y, COLUMN_WIDTH, Component.translatable("meshify.gui.name"), text -> MeshifyActions.sanitizeName(text).equals(text)
       );
-      nameField.setMaxLength(64);
+      nameField.setMaxLength(NAME_MAX_LENGTH);
       nameField.setValue(this.name);
       nameField.setHint(Component.translatable("meshify.gui.name.placeholder").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC));
       nameField.setResponder(text -> this.name = text);
@@ -247,7 +249,7 @@ final class MeshifyScreen extends Screen {
       };
    }
 
-   /** 1.21.11 takes the initial value in builder(); earlier versions set it afterwards. */
+   // 1.21.11 takes the initial value in builder(); earlier versions set it afterwards.
    private static <T> CycleButton.Builder<T> cycleButton(Function<T, Component> label, T initial) {
       //? if >=1.21.11 {
       return CycleButton.builder(label, initial);
@@ -255,7 +257,7 @@ final class MeshifyScreen extends Screen {
       /*return CycleButton.builder(label).withInitialValue(initial);*/
    }
 
-   /** A half-width on/off button for the export option {@code option}, labelled and explained by its translations. */
+   // A half-width on/off button for one export option, labelled and explained by its translations.
    private CycleButton<Boolean> toggle(int x, int y, String option, boolean value, Consumer<Boolean> onChange) {
       return CycleButton.onOffBuilder(value)
          .withTooltip(on -> Tooltip.create(Component.translatable("meshify.opt.desc." + option)))
@@ -303,7 +305,7 @@ final class MeshifyScreen extends Screen {
       this.status = withoutPrefix(text).withStyle(ChatFormatting.RED);
    }
 
-   /** The menu already says who sent it, so the chat prefix only costs width here. */
+   // The menu already says who sent it, so the chat prefix only costs width here.
    private static MutableComponent withoutPrefix(Component text) {
       String message = text.getString();
       return Component.literal(message.startsWith(MESSAGE_PREFIX) ? message.substring(MESSAGE_PREFIX.length()) : message);
@@ -314,7 +316,7 @@ final class MeshifyScreen extends Screen {
       this.exportButton.setMessage(Component.translatable(ExportJob.isRunning() ? "meshify.gui.cancel_button" : "meshify.gui.export_button"));
    }
 
-   /** Only a dim panel behind the menu: no blur, so the selection outline stays sharp. */
+   // Only a dim panel behind the menu: no blur, so the selection outline stays sharp.
    @Override
    //? if >=26.1 {
    /*public void extractBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {

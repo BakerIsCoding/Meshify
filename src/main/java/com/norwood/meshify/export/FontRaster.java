@@ -18,15 +18,15 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 
-/** Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic, one texel per font unit. */
+// Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic, one texel per font unit.
 public final class FontRaster {
    public static final int LINE_HEIGHT = 10;
-   /** Where the default font's baseline sits inside its line; each provider hangs off it. */
+   // Where the default font's baseline sits inside its line; each provider hangs off it.
    private static final int BASELINE = 7;
-   /** From {@code font/include/space.json}: the space character is not in the bitmap sheets. */
+   // From font/include/space.json: the space character is not in the bitmap sheets.
    private static final int SPACE_ADVANCE = 4;
    private static final int DEFAULT_GLYPH_HEIGHT = 8;
-   /** A glyph row is one int of mask bits; vanilla cells are 8 or 9 wide. */
+   // A glyph row is one int of mask bits; vanilla cells are 8 or 9 wide.
    private static final int MAX_CELL_WIDTH = 32;
    private static Map<Integer, FontRaster.Glyph> glyphs;
    private static boolean loadFailed;
@@ -51,7 +51,7 @@ public final class FontRaster {
       }
    }
 
-   /** Only valid once {@link #ensureLoaded} ran. */
+   // Only valid once ensureLoaded ran.
    public static boolean covers(int codePoint) {
       return codePoint == ' ' || glyphs != null && glyphs.containsKey(codePoint);
    }
@@ -71,7 +71,7 @@ public final class FontRaster {
       return loaded;
    }
 
-   /** The bitmap providers of the default font stack, highest priority first. */
+   // The bitmap providers of the default font stack, highest priority first.
    private static List<JsonObject> bitmapProviders(Minecraft client) throws IOException {
       Identifier fontId = Identifier.withDefaultNamespace("font/include/default.json");
       Resource resource = client.getResourceManager().getResource(fontId).orElseThrow(() -> new IOException("not found: " + fontId));
@@ -96,7 +96,7 @@ public final class FontRaster {
       return providers;
    }
 
-   /** Cuts one sheet into glyphs, keeping only a one-bit-per-pixel mask. */
+   // Cuts one sheet into glyphs, keeping only a one-bit-per-pixel mask.
    private static void readSheet(Minecraft client, JsonObject provider, Map<Integer, FontRaster.Glyph> loaded) throws IOException {
       Identifier file = Identifier.parse(provider.get("file").getAsString());
       Optional<Resource> sheetResource = client.getResourceManager().getResource(Identifier.fromNamespaceAndPath(file.getNamespace(), "textures/" + file.getPath()));
@@ -158,7 +158,7 @@ public final class FontRaster {
       return new FontRaster.Glyph(rows, cellWidth, cellHeight, width, height, ascent);
    }
 
-   /** Draws each line centred on a transparent canvas, the block of lines centred vertically. */
+   // Draws each line centred on a transparent canvas, the block of lines centred vertically.
    public static NativeImage render(String[] lines, int rgb, int canvasWidth, int canvasHeight) {
       NativeImage canvas = new NativeImage(canvasWidth, canvasHeight, false);
       canvas.fillRect(0, 0, canvasWidth, canvasHeight, 0);
@@ -199,7 +199,7 @@ public final class FontRaster {
       return glyph == null || codePoint == ' ' ? SPACE_ADVANCE : Math.round(glyph.width() * (float)glyph.height() / glyph.cellHeight()) + 1;
    }
 
-   /** Draws a glyph scaled from its cell height to its font height, nearest-neighbour. */
+   // Draws a glyph scaled from its cell height to its font height, nearest-neighbour.
    private static void drawGlyph(NativeImage canvas, FontRaster.Glyph glyph, int penX, int baseline, int argb) {
       int height = glyph.height();
       int top = baseline - glyph.ascent();
@@ -221,7 +221,7 @@ public final class FontRaster {
       }
    }
 
-   /** One cell of a bitmap sheet: {@code rows} holds one bit per pixel, high bit leftmost. */
+   // One cell of a bitmap sheet: rows holds one bit per pixel, high bit leftmost.
    private record Glyph(int[] rows, int cellWidth, int cellHeight, int width, int height, int ascent) {
    }
 }

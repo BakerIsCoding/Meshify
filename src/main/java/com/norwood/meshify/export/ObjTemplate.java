@@ -64,7 +64,7 @@ public final class ObjTemplate {
       return template;
    }
 
-   /** Splits a polygon into a fan of quads; an odd corner count leaves the last one a triangle with a doubled corner. */
+   // Splits a polygon into a fan of quads; an odd corner count leaves the last one a triangle with a doubled corner.
    private void addFace(String group, String material, String[] tokens, List<float[]> positions, List<float[]> texcoords) {
       int cornerCount = tokens.length - 1;
       float[][] corners = new float[cornerCount][];
@@ -93,7 +93,7 @@ public final class ObjTemplate {
       }
    }
 
-   /** Emits {@code group} (or every group when null), turned {@code yawDegrees} about the block's centre; faces the resolver maps to null are dropped. */
+   // Emits group (or every group when null), turned yawDegrees about the block's centre; faces the resolver maps to null are dropped.
    public void emit(MeshBuilder mesh, String group, BiFunction<String, float[], TextureKey> resolver, double blockX, double blockY, double blockZ, double yawDegrees) {
       double yaw = Math.toRadians(yawDegrees);
       double cos = Math.cos(yaw);

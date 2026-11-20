@@ -10,7 +10,7 @@ import net.minecraft.client.model.geom.builders.UVPair;
 import org.joml.Vector3f;
 *///?}
 
-/** Reads a baked quad, which each version stores differently. */
+// Reads a baked quad, which each version stores differently.
 public final class BakedQuads {
    private BakedQuads() {
    }
@@ -22,7 +22,7 @@ public final class BakedQuads {
       return quad.sprite();
    }
 
-   /** The quad's tint layer, or -1 when it is not tinted. */
+   // The quad's tint layer, or -1 when it is not tinted.
    public static int tintIndex(BakedQuad quad) {
       //? if >=26.1 {
       /*return quad.materialInfo().tintIndex();
@@ -40,7 +40,7 @@ public final class BakedQuads {
       *///?}
    }
 
-   /** The corner's UV, restated within {@code sprite}. */
+   // The corner's UV, restated within sprite.
    public static float[] spriteUv(BakedQuad quad, TextureAtlasSprite sprite, int corner) {
       //? if >=1.21.11 {
       long packed = quad.packedUV(corner);

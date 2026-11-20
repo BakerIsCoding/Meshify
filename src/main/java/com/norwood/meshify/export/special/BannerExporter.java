@@ -21,7 +21,7 @@ public final class BannerExporter {
    private BannerExporter() {
    }
 
-   /** The cuboids are the banner model's, at the 2/3 scale its renderer draws it, so each unwrap is sized apart from its box. */
+   // The cuboids are the banner model's, at the 2/3 scale its renderer draws it, so each unwrap is sized apart from its box.
    public static void export(
       MeshBuilder mesh, BlockGetter world, BlockPos pos, BlockState state, AbstractBannerBlock block, double blockX, double blockY, double blockZ
    ) {
@@ -60,7 +60,7 @@ public final class BannerExporter {
       }
    }
 
-   /** The banner base dyed its colour, with each pattern layer painted on top in its own colour. */
+   // The banner base dyed its colour, with each pattern layer painted on top in its own colour.
    private static TextureKey buildTexture(BlockGetter world, BlockPos pos, DyeColor baseColor) {
       List<TextureKey.CompositeLayer> layers = new ArrayList<>();
       //? if >=26.1 {

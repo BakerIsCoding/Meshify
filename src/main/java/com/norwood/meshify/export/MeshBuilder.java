@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.Map.Entry;
 
 public final class MeshBuilder {
-   /** Welding snaps every vertex to a grid of 1/1024 block. */
+   // Welding snaps every vertex to a grid of 1/1024 block.
    private static final int WELD_GRID = 1024;
    private static final float WELD_STEP = 1.0F / WELD_GRID;
    private static final double DEGENERATE_AREA = 1.0E-8;
@@ -25,7 +25,7 @@ public final class MeshBuilder {
       this.quads.computeIfAbsent(texture.id(), k -> new ArrayList<>()).add(new MeshBuilder.Quad(positions, uv, normal));
    }
 
-   /** Flags a texture as belonging to a light-emitting block, so it is not darkened by face shading. */
+   // Flags a texture as belonging to a light-emitting block, so it is not darkened by face shading.
    public void markEmissive(String textureId) {
       this.emissiveTextureIds.add(textureId);
    }
@@ -85,7 +85,7 @@ public final class MeshBuilder {
       return new MeshBuilder.OptimizationStats(WELD_GRID, degenerate, duplicate);
    }
 
-   /** Unit normal of the plane through a face's first three corners; straight up when they are collinear. */
+   // Unit normal of the plane through a face's first three corners; straight up when they are collinear.
    public static float[] faceNormal(float[][] corners) {
       float ax = corners[1][0] - corners[0][0];
       float ay = corners[1][1] - corners[0][1];

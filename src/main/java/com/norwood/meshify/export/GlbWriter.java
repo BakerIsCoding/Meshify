@@ -14,8 +14,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-/** Writes a self-contained .glb for web viewers: unlit, with baked face shading, one atlas and at most three draw calls. */
+// Writes a self-contained .glb for web viewers: unlit, with baked face shading, one atlas and at most three draw calls.
 public final class GlbWriter {
    private static final int NEAREST = 9728;
    private static final int CLAMP_TO_EDGE = 33071;
@@ -25,18 +27,24 @@ public final class GlbWriter {
    private static final int UNSIGNED_SHORT = 5123;
    private static final int UNSIGNED_INT = 5125;
    private static final int FLOAT = 5126;
+   private static final int GLB_MAGIC = 0x46546C67;
+   private static final int GLB_VERSION = 2;
+   private static final int JSON_CHUNK = 0x4E4F534A;
+   private static final int BIN_CHUNK = 0x004E4942;
+   private static final int HEADER_BYTES = 12;
+   private static final int CHUNK_HEADER_BYTES = 8;
 
    private GlbWriter() {
    }
 
-   /** The glTF material alpha modes; each gets its own primitive. */
+   // The glTF material alpha modes; each gets its own primitive.
    public enum AlphaMode {
       OPAQUE,
       MASK,
       BLEND
    }
 
-   /** {@code uvs} places each texture key in the atlas; a key missing from either map counts as untransformed and opaque. */
+   // uvs places each texture key in the atlas; a key missing from either map counts as untransformed and opaque.
    public static void write(
       Path outputDir, String name, byte[] atlasPng, MeshBuilder mesh, Map<String, UvTransform> uvs, Map<String, AlphaMode> alphaModes
    ) throws IOException {
@@ -66,7 +74,7 @@ public final class GlbWriter {
       Files.write(outputDir.resolve(name + ".glb"), build(buckets, atlasPng));
    }
 
-   /** Minecraft's face shading: top 1.0, north/south 0.8, east/west 0.6, bottom 0.5. */
+   // Minecraft's face shading: top 1.0, north/south 0.8, east/west 0.6, bottom 0.5.
    static byte shadeByte(float[] normal) {
       float ax = Math.abs(normal[0]);
       float ay = Math.abs(normal[1]);
@@ -83,7 +91,7 @@ public final class GlbWriter {
       return (byte)Math.round(srgbToLinear(shade) * 255.0F);
    }
 
-   /** The game shades in sRGB but glTF's COLOR_0 is linear, so the factor is stored linearised. */
+   // The game shades in sRGB but glTF's COLOR_0 is linear, so the factor is stored linearised.
    private static float srgbToLinear(float c) {
       return c <= 0.04045F ? c / 12.92F : (float)Math.pow((c + 0.055F) / 1.055F, 2.4);
    }
@@ -103,10 +111,10 @@ public final class GlbWriter {
 
          int vertexCount = bucket.vertexCount();
          int position = accessor(
-            bin, bufferViews, accessors, bucket.positions(vertexCount), ARRAY_BUFFER, FLOAT, "VEC3", vertexCount, false, bucket.minMax()
+            bin, bufferViews, accessors, bucket.positions(), ARRAY_BUFFER, FLOAT, "VEC3", vertexCount, false, bucket.minMax()
          );
-         int texcoord = accessor(bin, bufferViews, accessors, bucket.texcoords(vertexCount), ARRAY_BUFFER, FLOAT, "VEC2", vertexCount, false, null);
-         int color = accessor(bin, bufferViews, accessors, bucket.colors(vertexCount), ARRAY_BUFFER, UNSIGNED_BYTE, "VEC4", vertexCount, true, null);
+         int texcoord = accessor(bin, bufferViews, accessors, bucket.texcoords(), ARRAY_BUFFER, FLOAT, "VEC2", vertexCount, false, null);
+         int color = accessor(bin, bufferViews, accessors, bucket.colors(), ARRAY_BUFFER, UNSIGNED_BYTE, "VEC4", vertexCount, true, null);
 
          // uint16 indices while the bucket fits, which halves the index block on most exports.
          boolean shortIndices = vertexCount <= 65535;
@@ -208,21 +216,21 @@ public final class GlbWriter {
    private static byte[] container(byte[] json, byte[] bin) {
       int jsonPad = (4 - json.length % 4) % 4;
       int binPad = (4 - bin.length % 4) % 4;
-      int total = 12 + 8 + json.length + jsonPad + 8 + bin.length + binPad;
+      int total = HEADER_BYTES + CHUNK_HEADER_BYTES + json.length + jsonPad + CHUNK_HEADER_BYTES + bin.length + binPad;
       ByteBuffer buf = ByteBuffer.allocate(total).order(ByteOrder.LITTLE_ENDIAN);
-      buf.putInt(0x46546C67); // "glTF"
-      buf.putInt(2);
+      buf.putInt(GLB_MAGIC);
+      buf.putInt(GLB_VERSION);
       buf.putInt(total);
 
       buf.putInt(json.length + jsonPad);
-      buf.putInt(0x4E4F534A); // "JSON"
+      buf.putInt(JSON_CHUNK);
       buf.put(json);
       for (int i = 0; i < jsonPad; i++) {
          buf.put((byte)0x20); // the JSON chunk pads with spaces
       }
 
       buf.putInt(bin.length + binPad);
-      buf.putInt(0x004E4942); // "BIN\0"
+      buf.putInt(BIN_CHUNK);
       buf.put(bin);
       for (int i = 0; i < binPad; i++) {
          buf.put((byte)0);
@@ -237,21 +245,21 @@ public final class GlbWriter {
       }
    }
 
-   private static String join(float[] v) {
+   private static String join(float[] values) {
       StringBuilder joined = new StringBuilder();
-      for (int i = 0; i < v.length; i++) {
+      for (int i = 0; i < values.length; i++) {
          if (i > 0) {
             joined.append(',');
          }
 
          // Shortest text that parses back to the same float; rounding would break the accessor bounds.
-         joined.append(v[i]);
+         joined.append(values[i]);
       }
 
       return joined.toString();
    }
 
-   /** One alpha mode's worth of geometry: deduplicated vertices plus a triangle index list. */
+   // One alpha mode's worth of geometry: deduplicated vertices plus a triangle index list.
    private static final class Bucket {
       private final Map<Vertex, Integer> indexByVertex = new HashMap<>();
       private final List<Vertex> vertices = new ArrayList<>();
@@ -303,8 +311,8 @@ public final class GlbWriter {
          return new float[][]{this.min, this.max};
       }
 
-      byte[] positions(int n) {
-         ByteBuffer buf = ByteBuffer.allocate(n * 12).order(ByteOrder.LITTLE_ENDIAN);
+      byte[] positions() {
+         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 12).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
             buf.putFloat(vertex.x()).putFloat(vertex.y()).putFloat(vertex.z());
          }
@@ -312,8 +320,8 @@ public final class GlbWriter {
          return buf.array();
       }
 
-      byte[] texcoords(int n) {
-         ByteBuffer buf = ByteBuffer.allocate(n * 8).order(ByteOrder.LITTLE_ENDIAN);
+      byte[] texcoords() {
+         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 8).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
             buf.putFloat(vertex.u()).putFloat(vertex.v());
          }
@@ -321,9 +329,9 @@ public final class GlbWriter {
          return buf.array();
       }
 
-      byte[] colors(int n) {
+      byte[] colors() {
          // Grey, so r=g=b; VEC4 because glTF wants attribute elements 4-byte aligned.
-         ByteBuffer buf = ByteBuffer.allocate(n * 4).order(ByteOrder.LITTLE_ENDIAN);
+         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
             buf.put(vertex.shade()).put(vertex.shade()).put(vertex.shade()).put((byte)255);
          }
@@ -348,7 +356,7 @@ public final class GlbWriter {
    private record Vertex(float x, float y, float z, float u, float v, byte shade) {
    }
 
-   /** Run with {@code gradlew glbCheck}. */
+   // Run with gradlew glbCheck.
    public static void main(String[] args) throws IOException {
       // Linearised shade factors: 1.0 / 0.8 / 0.6 / 0.5 through the sRGB transfer function.
       check(shadeByte(new float[]{0.0F, 1.0F, 0.0F}) == (byte)255, "top face is full bright");
@@ -378,21 +386,21 @@ public final class GlbWriter {
 
       byte[] glb = Files.readAllBytes(dir.resolve("check.glb"));
       ByteBuffer buf = ByteBuffer.wrap(glb).order(ByteOrder.LITTLE_ENDIAN);
-      check(buf.getInt() == 0x46546C67, "glTF magic");
-      check(buf.getInt() == 2, "glTF version 2");
+      check(buf.getInt() == GLB_MAGIC, "glTF magic");
+      check(buf.getInt() == GLB_VERSION, "glTF version 2");
       check(buf.getInt() == glb.length, "header length matches the file");
 
       int jsonLength = buf.getInt();
-      check(buf.getInt() == 0x4E4F534A, "first chunk is JSON");
+      check(buf.getInt() == JSON_CHUNK, "first chunk is JSON");
       check(jsonLength % 4 == 0, "JSON chunk is 4-byte aligned");
       byte[] jsonBytes = new byte[jsonLength];
       buf.get(jsonBytes);
       String json = new String(jsonBytes, StandardCharsets.UTF_8).trim();
 
       int binLength = buf.getInt();
-      check(buf.getInt() == 0x004E4942, "second chunk is BIN");
+      check(buf.getInt() == BIN_CHUNK, "second chunk is BIN");
       check(binLength % 4 == 0, "BIN chunk is 4-byte aligned");
-      check(12 + 8 + jsonLength + 8 + binLength == glb.length, "chunks fill the file exactly");
+      check(HEADER_BYTES + CHUNK_HEADER_BYTES + jsonLength + CHUNK_HEADER_BYTES + binLength == glb.length, "chunks fill the file exactly");
 
       // Two identical quads must dedup to 4 vertices and 12 indices.
       check(json.contains("\"count\":4,\"type\":\"VEC3\""), "opaque quads deduplicated to 4 vertices");
@@ -404,7 +412,7 @@ public final class GlbWriter {
       check(json.contains("\"magFilter\":9728"), "nearest sampling");
       check(!json.contains("NORMAL"), "no normal attribute");
       check(Float.parseFloat(join(new float[]{0.9930997F})) == 0.9930997F, "accessor bounds keep full float precision");
-      java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"buffers\":\\[\\{\"byteLength\":(\\d+)").matcher(json);
+      Matcher matcher = Pattern.compile("\"buffers\":\\[\\{\"byteLength\":(\\d+)").matcher(json);
       check(matcher.find(), "buffer declared");
       int declared = Integer.parseInt(matcher.group(1));
       // The BIN chunk is padded up to a 4-byte boundary, so it can exceed the buffer by 1-3 bytes.

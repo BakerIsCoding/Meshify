@@ -12,25 +12,25 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
-/** Runs a block entity's own renderer into a {@link CaptureQueue}, for block entities no special exporter handles. */
+// Runs a block entity's own renderer into a CaptureQueue, for block entities no special exporter handles.
 public final class BlockEntityCaptureExporter {
    private BlockEntityCaptureExporter() {
    }
 
    public static boolean export(MeshBuilder mesh, Minecraft client, BlockPos pos, BlockEntity blockEntity, double blockX, double blockY, double blockZ, List<String> warnings) {
-      BlockEntityRenderDispatcher renderManager = client.getBlockEntityRenderDispatcher();
+      BlockEntityRenderDispatcher dispatcher = client.getBlockEntityRenderDispatcher();
 
       try {
-         var renderer = renderManager.getRenderer(blockEntity);
+         var renderer = dispatcher.getRenderer(blockEntity);
          if (renderer == null) {
             return false;
          }
 
          // From 26.2 extraction only succeeds when the flag matches how the renderer wants to be drawn.
          //? if >=26.2 {
-         /*BlockEntityRenderState state = renderManager.tryExtractRenderState(blockEntity, 0.0F, null, renderer.shouldRenderOffScreen());
+         /*BlockEntityRenderState state = dispatcher.tryExtractRenderState(blockEntity, 0.0F, null, renderer.shouldRenderOffScreen());
          *///?} else
-         BlockEntityRenderState state = renderManager.tryExtractRenderState(blockEntity, 0.0F, null);
+         BlockEntityRenderState state = dispatcher.tryExtractRenderState(blockEntity, 0.0F, null);
          if (state == null) {
             return false;
          }
@@ -38,7 +38,7 @@ public final class BlockEntityCaptureExporter {
          PoseStack matrices = new PoseStack();
          matrices.translate(blockX, blockY, blockZ);
          CaptureQueue queue = new CaptureQueue(mesh, client, warnings);
-         renderManager.submit(state, matrices, queue, dummyCamera(pos));
+         dispatcher.submit(state, matrices, queue, dummyCamera(pos));
          return queue.capturedQuads > 0;
       } catch (Exception exception) {
          warnings.add("BER capture failed @ " + pos.toShortString() + " (" + blockEntity.getType() + "): " + exception);
@@ -46,7 +46,7 @@ public final class BlockEntityCaptureExporter {
       }
    }
 
-   /** A camera a little in front of and above {@code pos}, for renderers that want one. */
+   // A camera a little in front of and above pos, for renderers that want one.
    static CameraRenderState dummyCamera(BlockPos pos) {
       CameraRenderState camera = new CameraRenderState();
       camera.initialized = true;

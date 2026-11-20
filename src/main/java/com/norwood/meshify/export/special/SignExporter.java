@@ -28,11 +28,15 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public final class SignExporter {
-   /** Four lines of the game's sign font. The text quads are all twice as wide as they are tall. */
+   // Four lines of the game's sign font. The text quads are all twice as wide as they are tall.
    private static final int TEXT_HEIGHT = 4 * FontRaster.LINE_HEIGHT;
    private static final int TEXT_WIDTH = 2 * TEXT_HEIGHT;
-   /** The whole text texture, in the corner order both text quads use. */
+   // The whole text texture, in the corner order both text quads use.
    private static final double[][] TEXT_UV = {{0.0, TEXT_HEIGHT}, {TEXT_WIDTH, TEXT_HEIGHT}, {TEXT_WIDTH, 0.0}, {0.0, 0.0}};
+   private static final TextArea STANDING_TEXT = new TextArea(1.5, 14.5, 10.0, 16.5, 7.233333333333333, 8.766666666666666);
+   // The back is against the wall, so only the front gets text.
+   private static final TextArea WALL_TEXT = new TextArea(1.5, 14.5, 4.75, 11.25, 14.566666666666666, Double.NaN);
+   private static final TextArea HANGING_TEXT = new TextArea(2.0, 14.0, 2.0, 8.0, 6.9, 9.1);
 
    private SignExporter() {
    }
@@ -62,14 +66,12 @@ public final class SignExporter {
       }
       //?}
 
-      // The text rectangles, in the model pixels of each board.
       if (block instanceof StandingSignBlock) {
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, 1.5, 14.5, 10.0, 16.5, 7.233333333333333, 8.766666666666666);
+         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, STANDING_TEXT);
       } else if (block instanceof WallSignBlock) {
-         // The back is against the wall, so only the front gets text.
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, 1.5, 14.5, 4.75, 11.25, 14.566666666666666, Double.NaN);
+         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, WALL_TEXT);
       } else {
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, 2.0, 14.0, 2.0, 8.0, 6.9, 9.1);
+         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, HANGING_TEXT);
       }
 
       return true;
@@ -87,7 +89,7 @@ public final class SignExporter {
       }
    }
 
-   /** The sign without its text, built from the sign texture the renderer draws before 26.2; false when that fails. */
+   // The sign without its text, built from the sign texture the renderer draws before 26.2; false when that fails.
    private static boolean emitBody(
       MeshBuilder mesh,
       Minecraft client,
@@ -148,23 +150,8 @@ public final class SignExporter {
       return true;
    }
 
-   /** Lays the text over the board in model pixels: the front at {@code zFront}, the back at {@code zBack} unless that is NaN. */
    private static void emitTexts(
-      MeshBuilder mesh,
-      Minecraft client,
-      BlockGetter world,
-      BlockPos pos,
-      double blockX,
-      double blockY,
-      double blockZ,
-      double yaw,
-      List<String> warnings,
-      double x0,
-      double x1,
-      double y0,
-      double y1,
-      double zFront,
-      double zBack
+      MeshBuilder mesh, Minecraft client, BlockGetter world, BlockPos pos, double blockX, double blockY, double blockZ, double yaw, List<String> warnings, TextArea area
    ) {
       if (!(world.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
          return;
@@ -177,12 +164,18 @@ public final class SignExporter {
       SignText frontText = sign.getFrontText();
       SignText backText = sign.getBackText();
       //?}
+      double x0 = area.x0();
+      double x1 = area.x1();
+      double y0 = area.y0();
+      double y1 = area.y1();
       TextureKey front = textTexture(client, frontText, warnings);
       if (front != null) {
+         double zFront = area.zFront();
          double[][] corners = {{x1, y0, zFront}, {x0, y0, zFront}, {x0, y1, zFront}, {x1, y1, zFront}};
          BoxUv.rotatedQuad(mesh, front, blockX, blockY, blockZ, corners, TEXT_UV, TEXT_WIDTH, TEXT_HEIGHT, yaw, new float[]{0.0F, 0.0F, -1.0F});
       }
 
+      double zBack = area.zBack();
       TextureKey back = Double.isNaN(zBack) ? null : textTexture(client, backText, warnings);
       if (back != null) {
          double[][] corners = {{x0, y0, zBack}, {x1, y0, zBack}, {x1, y1, zBack}, {x0, y1, zBack}};
@@ -190,7 +183,7 @@ public final class SignExporter {
       }
    }
 
-   /** The side's text rasterised, or null when it is blank or the font would not load. */
+   // The side's text rasterised, or null when it is blank or the font would not load.
    private static TextureKey textTexture(Minecraft client, SignText signText, List<String> warnings) {
       //? if >=26.3 {
       /*Component[] messages = signText.getMessages(false).toArray(Component[]::new);
@@ -223,5 +216,9 @@ public final class SignExporter {
       int rgb = signText.getColor().getTextColor() & 0xFFFFFF;
       String id = String.format(Locale.ROOT, "sign_text_%08x_%06x", allLines.toString().hashCode(), rgb);
       return TextureKey.generated(id, ignored -> FontRaster.render(lines, rgb, TEXT_WIDTH, TEXT_HEIGHT));
+   }
+
+   // Where the text lies on a board, in model pixels: the front at zFront, the back at zBack unless that is NaN.
+   private record TextArea(double x0, double x1, double y0, double y1, double zFront, double zBack) {
    }
 }

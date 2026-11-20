@@ -64,7 +64,7 @@ public final class SkullExporter {
       return true;
    }
 
-   /** The head's entity texture, under {@code textures/entity/}; null for heads this cuboid can't draw. */
+   // The head's entity texture, under textures/entity/; null for heads this cuboid can't draw.
    private static Head headFor(Type type) {
       if (!(type instanceof Types vanilla)) {
          return null;
@@ -93,7 +93,7 @@ public final class SkullExporter {
       }
    }
 
-   /** The owner's skin URL from the head's profile, or null when it has none or it can't be read. */
+   // The owner's skin URL from the head's profile, or null when it has none or it can't be read.
    private static String resolveSkinUrl(BlockGetter world, BlockPos pos) {
       try {
          if (!(world.getBlockEntity(pos) instanceof SkullBlockEntity skull)) {
@@ -121,7 +121,7 @@ public final class SkullExporter {
       return null;
    }
 
-   /** An entity texture with the head at its top-left; the piglin's head is wider than the rest. */
+   // An entity texture with the head at its top-left; the piglin's head is wider than the rest.
    private record Head(String texture, int textureHeight, double halfWidth) {
    }
 }

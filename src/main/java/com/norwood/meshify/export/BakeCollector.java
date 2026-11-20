@@ -11,14 +11,14 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Direction.AxisDirection;
 
-/** Merges coplanar full-block faces into large quads, each textured from a sheet the faces are painted onto. */
+// Merges coplanar full-block faces into large quads, each textured from a sheet the faces are painted onto.
 public final class BakeCollector {
    public static final int LAYER_SOLID = 0;
    public static final int LAYER_ALPHA = 1;
-   /** Or'ed onto a layer for light-emitting blocks; faces only merge within the same layer. */
+   // Or'ed onto a layer for light-emitting blocks; faces only merge within the same layer.
    public static final int LAYER_EMISSIVE = 2;
    private static final float EPSILON = 1.0E-4F;
-   /** Edge pixels repeated around every baked rectangle, so sampling never bleeds in a neighbour. */
+   // Edge pixels repeated around every baked rectangle, so sampling never bleeds in a neighbour.
    private static final int BORDER = 2;
    private static final int MIN_SHEET_WIDTH = 64;
    private final int uvSize;
@@ -33,7 +33,7 @@ public final class BakeCollector {
       this.maxSheetSize = Integer.highestOneBit(maxSheetSize);
    }
 
-   /** Takes a face lying on its block's {@code face} side and covering it whole; false leaves it to the plain mesh. */
+   // Takes a face that covers one whole side of its block; false leaves it to the plain mesh.
    public boolean tryAdd(double blockX, double blockY, double blockZ, Direction face, TextureKey texture, float[][] positions, float[][] uv, int layer) {
       int axis = face.getAxis().ordinal();
       boolean positive = face.getAxisDirection() == AxisDirection.POSITIVE;
@@ -143,7 +143,7 @@ public final class BakeCollector {
       this.sources.clear();
    }
 
-   /** Covers one plane's cells with as few rectangles as it can, none wider or taller than a sheet holds. */
+   // Covers one plane's cells with as few rectangles as it can, none wider or taller than a sheet holds.
    private void mergeCells(BakeCollector.PlaneKey plane, Map<Long, BakeCollector.Cell> cells, List<BakeCollector.Rect> out) {
       int maxCells = Math.max(1, (this.maxSheetSize - 2 * BORDER) / this.uvSize);
       int minU = Integer.MAX_VALUE;
@@ -196,7 +196,7 @@ public final class BakeCollector {
       }
    }
 
-   /** Shelf-packs the rectangles, tallest first, onto as many sheets as they need. */
+   // Shelf-packs the rectangles, tallest first, onto as many sheets as they need.
    private void packOntoSheets(List<BakeCollector.Rect> rects, List<BakeCollector.Placement> out, List<int[]> sheetSizes) {
       List<BakeCollector.Rect> sorted = new ArrayList<>(rects);
       sorted.sort(Comparator.comparingInt(BakeCollector.Rect::height).reversed());
@@ -242,7 +242,7 @@ public final class BakeCollector {
       sheetSizes.add(new int[]{sheetWidth, TextureStore.ceilPowerOfTwo(usedHeight)});
    }
 
-   /** Pixels a run of {@code cells} takes on a sheet, border included. */
+   // Pixels a run of cells takes on a sheet, border included.
    private int padded(int cells) {
       return cells * this.uvSize + 2 * BORDER;
    }
@@ -274,7 +274,7 @@ public final class BakeCollector {
       return sheet;
    }
 
-   /** Paints one cell's texture into a {@code uvSize} square, sampled through the face's corner UVs. */
+   // Paints one cell's texture into a uvSize square, sampled through the face's corner UVs.
    private void blit(NativeImage sheet, NativeImage source, BakeCollector.Cell cell, int sheetX, int sheetY) {
       int sourceWidth = source.getWidth();
       int sourceHeight = source.getHeight();
@@ -300,26 +300,26 @@ public final class BakeCollector {
       return c00 * (1.0F - fx) * (1.0F - fy) + c10 * fx * (1.0F - fy) + c01 * (1.0F - fx) * fy + c11 * fx * fy;
    }
 
-   /** Repeats a rectangle's edge pixels outward across its {@link #BORDER}. */
-   private static void padBorder(NativeImage image, int x, int y, int w, int h) {
-      for (int dy = -BORDER; dy < h + BORDER; dy++) {
-         int srcY = Math.clamp(dy, 0, h - 1);
+   // Repeats a rectangle's edge pixels outward across its BORDER.
+   private static void padBorder(NativeImage image, int x, int y, int width, int height) {
+      for (int dy = -BORDER; dy < height + BORDER; dy++) {
+         int srcY = Math.clamp(dy, 0, height - 1);
 
-         for (int dx = -BORDER; dx < w + BORDER; dx++) {
-            if (dx >= 0 && dx < w && dy >= 0 && dy < h) {
+         for (int dx = -BORDER; dx < width + BORDER; dx++) {
+            if (dx >= 0 && dx < width && dy >= 0 && dy < height) {
                continue;
             }
 
             int outX = x + dx;
             int outY = y + dy;
             if (outX >= 0 && outY >= 0 && outX < image.getWidth() && outY < image.getHeight()) {
-               image.setPixel(outX, outY, image.getPixel(x + Math.clamp(dx, 0, w - 1), y + srcY));
+               image.setPixel(outX, outY, image.getPixel(x + Math.clamp(dx, 0, width - 1), y + srcY));
             }
          }
       }
    }
 
-   /** Loads each source texture once; a failed one is remembered as null, so it only warns once. */
+   // Loads each source texture once; a failed one is remembered as null, so it only warns once.
    private NativeImage loadSource(TextureKey texture, Minecraft client, List<String> warnings) {
       if (this.sources.containsKey(texture.id())) {
          return this.sources.get(texture.id());
@@ -391,13 +391,13 @@ public final class BakeCollector {
    }
 
    public record Stats(int facesConsumed, int quadsEmitted, int sheets, long bakedPixels) {
-      /** How many fewer quads the merge left, as a percentage of the faces it took. */
+      // How many fewer quads the merge left, as a percentage of the faces it took.
       public double reductionPercent() {
          return this.facesConsumed > 0 ? 100.0 * (1.0 - (double)this.quadsEmitted / this.facesConsumed) : 0.0;
       }
 
       public double megapixels() {
-         return this.bakedPixels / 1000000.0;
+         return this.bakedPixels / 1_000_000.0;
       }
    }
 }

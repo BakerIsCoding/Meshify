@@ -63,8 +63,8 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3fc;
 
 public final class RegionExporter {
-   public static final long MAX_VOLUME = 16000000L;
-   /** The cull faces a model part files its quads under, and null for the ones it never culls. */
+   public static final long MAX_VOLUME = 16_000_000L;
+   // The cull faces a model part files its quads under, and null for the ones it never culls.
    public static final Direction[] QUAD_FACES = {
       null, Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
    };
@@ -80,7 +80,7 @@ public final class RegionExporter {
       return exportRoot(client).resolve(name);
    }
 
-   /** Writes a finished scan to disk off the client thread; {@code onStage} runs before each step and may throw to abort. */
+   // Writes a finished scan to disk off the client thread; onStage runs before each step and may throw to abort.
    public static RegionExporter.Result finish(Minecraft client, RegionExporter.Scan scan, Consumer<ExportStage> onStage) throws IOException {
       ExportOptions options = scan.options();
       MeshBuilder mesh = scan.mesh();
@@ -147,9 +147,9 @@ public final class RegionExporter {
       return unloaded;
    }
 
-   /** Smallest box around the non-air blocks, if any; unloaded chunks read as air, so check them first. */
+   // Smallest box around the non-air blocks, if any; unloaded chunks read as air, so check them first.
    public static Optional<BoundingBox> solidBounds(ClientLevel world, BlockPos min, BlockPos max) {
-      // ponytail: reads every block on the client thread (~1 s at the limit); skip empty chunk sections if it stalls.
+      // shortcut: reads every block on the client thread (~1 s at the limit); skip empty chunk sections if it stalls.
       int loX = Integer.MAX_VALUE;
       int loY = Integer.MAX_VALUE;
       int loZ = Integer.MAX_VALUE;
@@ -233,9 +233,9 @@ public final class RegionExporter {
       }
    }
 
-   /** Builds the mesh a slice at a time on the client thread; {@link #finish} does the rest off it. */
+   // Builds the mesh a slice at a time on the client thread; finish does the rest off it.
    public static final class Scanner {
-      /** Reading the clock costs about as much as skipping an air block, so it is read every 256 blocks. */
+      // Reading the clock costs about as much as skipping an air block, so it is read every 256 blocks.
       private static final int CLOCK_CHECK_MASK = 0xFF;
 
       private final Minecraft client;
@@ -288,7 +288,7 @@ public final class RegionExporter {
          return (double)this.visitedBlocks / this.volume;
       }
 
-      /** Reads blocks until {@code deadlineNanos} passes; true once the whole region has been read. */
+      // Reads blocks until deadlineNanos passes; true once the whole region has been read.
       public boolean step(long deadlineNanos) {
          while (this.cursor.hasNext()) {
             if (this.exportBlock(this.cursor.next())) {
@@ -303,20 +303,20 @@ public final class RegionExporter {
          return !this.cursor.hasNext();
       }
 
-      /** Captures the entities in one go and packages everything for {@link #finish}. */
+      // Captures the entities in one go and packages everything for finish.
       public RegionExporter.Scan complete() {
          int entities = EntityCaptureExporter.export(this.mesh, this.client, this.world, this.min, this.max, this.warnings);
          return new RegionExporter.Scan(this.options, this.mesh, this.baker, this.min, this.max, this.exportedBlocks, entities, this.skippedTypes, this.warnings);
       }
 
-      /** Frees the bake sources of a scan that will never reach {@link #finish}. */
+      // Frees the bake sources of a scan that will never reach finish.
       public void discard() {
          if (this.baker != null) {
             this.baker.close();
          }
       }
 
-      /** Adds one block to the mesh; false for air and for blocks nothing knows how to export. */
+      // Adds one block to the mesh; false for air and for blocks nothing knows how to export.
       private boolean exportBlock(BlockPos pos) {
          BlockState state = this.world.getBlockState(pos);
          if (state.isAir()) {
@@ -427,7 +427,7 @@ public final class RegionExporter {
          return hasQuads;
       }
 
-      /** Faces on the region boundary always stay, so the cut edge of a build is not left open. */
+      // Faces on the region boundary always stay, so the cut edge of a build is not left open.
       private boolean isHidden(BlockState state, BlockPos pos, Direction face) {
          BlockPos neighborPos = pos.relative(face);
          if (!this.bounds.isInside(neighborPos)) {

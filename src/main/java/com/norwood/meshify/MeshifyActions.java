@@ -28,14 +28,14 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
-/** Actions shared by the /meshify commands and the menu, so both behave the same. */
+// Actions shared by the /meshify commands and the menu, so both behave the same.
 final class MeshifyActions {
    static final String ALL_SIDES = "all";
-   /** Stands for whichever way the player is looking, up and down included. */
+   // Stands for whichever way the player is looking, up and down included.
    static final String FACING = "facing";
    static final List<String> SIDES = List.of(ALL_SIDES, "up", "down", "north", "south", "east", "west", FACING);
 
-   /** The choices the menu cycles through and the command suggests; the parser accepts anything in range. */
+   // The choices the menu cycles through and the command suggests; the parser accepts anything in range.
    static final List<Integer> TEXTURE_SCALES = List.of(1, 2, 4, 8);
    static final List<Integer> BAKE_UV_SIZES = List.of(8, 16, 32, 64, 128);
    static final List<Integer> BAKE_MAX_ATLAS_SIZES = List.of(1024, 2048, 4096, 8192);
@@ -46,12 +46,12 @@ final class MeshifyActions {
    private static final int HIGHEST_BAKE_UV_SIZE = 256;
    private static final int LOWEST_BAKE_MAX_ATLAS = 256;
    private static final int HIGHEST_BAKE_MAX_ATLAS = 16384;
-   private static final long WARN_ABOVE_VOLUME = 2000000L;
+   private static final long WARN_ABOVE_VOLUME = 2_000_000L;
 
    private MeshifyActions() {
    }
 
-   /** Where an action reports back: the chat for commands, the status line for the menu. */
+   // Where an action reports back: the chat for commands, the status line for the menu.
    record Feedback(Consumer<Component> onInfo, Consumer<Component> onError) {
       static final Feedback IGNORE = new Feedback(text -> {
       }, text -> {
@@ -70,14 +70,14 @@ final class MeshifyActions {
       }
    }
 
-   /** The block under the crosshair, or the one the player is standing on when aiming at nothing. */
+   // The block under the crosshair, or the one the player is standing on when aiming at nothing.
    static BlockPos targetedBlock(Minecraft client) {
       return client.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
          ? hit.getBlockPos()
          : client.player.blockPosition();
    }
 
-   /** A corner's coordinates, or "unset". */
+   // A corner's coordinates, or "unset".
    static Component describeCorner(BlockPos pos) {
       return pos == null ? Component.translatable("meshify.label.unset") : Component.literal(pos.toShortString());
    }
@@ -105,7 +105,7 @@ final class MeshifyActions {
       feedback.info(Component.translatable("meshify.msg.cleared"));
    }
 
-   /** Grows (or, for negative {@code blocks}, shrinks) every side, or only {@code sideName}. */
+   // Grows (or, for negative blocks, shrinks) every side, or only sideName.
    static boolean resize(Feedback feedback, int blocks, String sideName) {
       if (!requireSelection(feedback)) {
          return false;
@@ -143,7 +143,7 @@ final class MeshifyActions {
       return true;
    }
 
-   /** Shrinks the region to the blocks actually in it, dropping the air around them. */
+   // Shrinks the region to the blocks actually in it, dropping the air around them.
    static boolean trim(Feedback feedback) {
       ClientLevel world = Minecraft.getInstance().level;
       if (!requireSelection(feedback) || !requireSameDimension(feedback, world)) {
@@ -220,7 +220,7 @@ final class MeshifyActions {
       feedback.info(Component.translatable("meshify.msg.open_folder", ExportJob.folderLink(root)));
    }
 
-   /** Starts an export of the selection; a blank {@code rawOptions} reuses the previous run's options. */
+   // Starts an export of the selection; a blank rawOptions reuses the previous run's options.
    static boolean export(Feedback feedback, String name, String rawOptions) {
       if (ExportJob.isRunning()) {
          feedback.error(Component.translatable("meshify.error.busy"));
@@ -268,12 +268,12 @@ final class MeshifyActions {
       return true;
    }
 
-   /** The export folder is named after it, so only characters every file system accepts survive. */
+   // The export folder is named after it, so only characters every file system accepts survive.
    static String sanitizeName(String name) {
       return name.replaceAll("[^A-Za-z0-9_\\-]", "_");
    }
 
-   /** Unknown tokens only get a warning, so a typo does not throw away the rest of the command. */
+   // Unknown tokens only get a warning, so a typo does not throw away the rest of the command.
    static ExportOptions parseOptions(String name, String rawOptions, Feedback feedback) {
       boolean mergeAtlas = true;
       boolean weldVertices = false;
@@ -297,10 +297,10 @@ final class MeshifyActions {
             default -> {
                try {
                   if (token.startsWith("uv")) {
-                     bakeUvSize = Math.clamp(Integer.parseInt(token.substring(2)), 1, HIGHEST_BAKE_UV_SIZE);
+                     bakeUvSize = Math.clamp(Integer.parseInt(token.substring("uv".length())), 1, HIGHEST_BAKE_UV_SIZE);
                      bake = true;
                   } else if (token.startsWith("max")) {
-                     bakeMaxAtlas = Math.clamp(Integer.parseInt(token.substring(3)), LOWEST_BAKE_MAX_ATLAS, HIGHEST_BAKE_MAX_ATLAS);
+                     bakeMaxAtlas = Math.clamp(Integer.parseInt(token.substring("max".length())), LOWEST_BAKE_MAX_ATLAS, HIGHEST_BAKE_MAX_ATLAS);
                      bake = true;
                   } else {
                      textureScale = Math.clamp(Integer.parseInt(token), 1, HIGHEST_TEXTURE_SCALE);
@@ -344,7 +344,7 @@ final class MeshifyActions {
       return String.join(" ", tokens);
    }
 
-   /** Never clobbers a previous export: {@code shop}, then {@code shop_2}, {@code shop_3}… */
+   // Never clobbers a previous export: shop, then shop_2, shop_3…
    private static String uniqueName(Minecraft client, String name) {
       Path root = RegionExporter.exportRoot(client);
       String candidate = name;
@@ -378,7 +378,7 @@ final class MeshifyActions {
       return ComponentUtils.formatList(parts, Component.literal(", "));
    }
 
-   /** Self-check, run with {@code gradlew optionsCheck}. */
+   // Self-check, run with gradlew optionsCheck.
    public static void main(String[] args) {
       List<ExportOptions> cases = List.of(
          new ExportOptions("check", true, 1, false, false, false, DEFAULT_BAKE_UV_SIZE, DEFAULT_BAKE_MAX_ATLAS),

@@ -76,7 +76,7 @@ import org.joml.Vector3f;
 import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
-/** Stands in for the game's render queue, so block-entity and entity renderers draw into the mesh instead. */
+// Stands in for the game's render queue, so block-entity and entity renderers draw into the mesh instead.
 final class CaptureQueue implements SubmitNodeCollector {
    private static final int MAP_SIZE = 128;
    private final MeshBuilder mesh;
@@ -97,7 +97,7 @@ final class CaptureQueue implements SubmitNodeCollector {
       return this;
    }
 
-   /** A consumer that turns the layer's vertices into quads, or null for overlay layers that are not geometry. */
+   // A consumer that turns the layer's vertices into quads, or null for overlay layers that are not geometry.
    private CaptureQueue.CapturingConsumer capturingConsumer(RenderType layer, TextureAtlasSprite sprite, int tint) {
       String name = ((RenderTypeNameAccessor)layer).meshify$getName().toLowerCase(Locale.ROOT);
       if (name.contains("glint") || name.contains("outline") || name.contains("crumbling") || name.contains("shadow")) {
@@ -133,7 +133,7 @@ final class CaptureQueue implements SubmitNodeCollector {
       return new CaptureQueue.CapturingConsumer(this, resolver, layer.mode() == Mode.TRIANGLES);
    }
 
-   /** Finds the sprite an atlas quad samples by the centre of its UVs, and restates the UVs within that sprite. */
+   // Finds the sprite an atlas quad samples by the centre of its UVs, and restates the UVs within that sprite.
    private TextureKey resolveAtlas(Identifier atlasId, float[][] uv, int tint) {
       Map<Identifier, TextureAtlasSprite> sprites = this.atlasCache.computeIfAbsent(atlasId, id -> {
          if (this.client.getTextureManager().getTexture(id) instanceof TextureAtlas atlas) {
@@ -165,7 +165,7 @@ final class CaptureQueue implements SubmitNodeCollector {
       return null;
    }
 
-   /** Maps are drawn from their pixel data, found by the id in the texture name or else the item frame holding them. */
+   // Maps are drawn from their pixel data, found by the id in the texture name or else the item frame holding them.
    private CaptureQueue.QuadResolver tryMapResolver(Identifier textureId) {
       String path = textureId.getPath();
       boolean mapTexture = path.startsWith("map/");
@@ -229,7 +229,7 @@ final class CaptureQueue implements SubmitNodeCollector {
       };
    }
 
-   /** Renderers pass 0 as well as white for an uncoloured layer. */
+   // Renderers pass 0 as well as white for an uncoloured layer.
    private static int normalizeRendererTint(int argb) {
       return argb == 0 ? -1 : TextureKey.normalizeTint(argb);
    }
@@ -405,7 +405,7 @@ final class CaptureQueue implements SubmitNodeCollector {
       }
    }
 
-   /** The colour the renderer gave the quad's tint layer, or -1 when the quad is not tinted. */
+   // The colour the renderer gave the quad's tint layer, or -1 when the quad is not tinted.
    private static int layerTint(int[] tintLayers, BakedQuad quad) {
       int layer = BakedQuads.tintIndex(quad);
       return layer >= 0 && tintLayers != null && layer < tintLayers.length ? tintLayers[layer] : -1;
@@ -534,7 +534,7 @@ final class CaptureQueue implements SubmitNodeCollector {
    *///?}
 
    private static final class CapturingConsumer implements VertexConsumer {
-      /** Per vertex: x, y, z, u, v, the normal's x, y, z, then 1 once a normal was given. */
+      // Per vertex: x, y, z, u, v, the normal's x, y, z, then 1 once a normal was given.
       private static final int U = 3;
       private static final int V = 4;
       private static final int NORMAL = 5;
@@ -623,7 +623,7 @@ final class CaptureQueue implements SubmitNodeCollector {
          return this;
       }
 
-      /** Groups the vertices into quads; a triangle repeats its last corner to make one. */
+      // Groups the vertices into quads; a triangle repeats its last corner to make one.
       void finish() {
          this.flushVertex();
 
@@ -655,7 +655,7 @@ final class CaptureQueue implements SubmitNodeCollector {
    }
 
    private interface QuadResolver {
-      /** The texture for a quad, or null to drop it; may rewrite {@code uv} into that texture's space. */
+      // The texture for a quad, or null to drop it; may rewrite uv into that texture's space.
       TextureKey resolve(float[][] uv);
    }
 }

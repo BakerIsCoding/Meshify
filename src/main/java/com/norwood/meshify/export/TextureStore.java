@@ -10,7 +10,7 @@ import java.util.Map.Entry;
 import net.minecraft.client.Minecraft;
 
 public final class TextureStore implements AutoCloseable {
-   /** Edge pixels repeated around each atlas entry, so sampling never bleeds in a neighbour. */
+   // Edge pixels repeated around each atlas entry, so sampling never bleeds in a neighbour.
    private static final int PADDING = 4;
    private static final int MIN_ATLAS_WIDTH = 64;
    private static final int PLACEHOLDER_SIZE = 16;
@@ -59,7 +59,7 @@ public final class TextureStore implements AutoCloseable {
       return scaled;
    }
 
-   /** The magenta and black checkerboard the game shows for a missing texture. */
+   // The magenta and black checkerboard the game shows for a missing texture.
    private static NativeImage placeholder() {
       NativeImage image = new NativeImage(PLACEHOLDER_SIZE, PLACEHOLDER_SIZE, false);
 
@@ -73,7 +73,7 @@ public final class TextureStore implements AutoCloseable {
       return image;
    }
 
-   /** Shelf-packs every texture, tallest first, into one power-of-two atlas. */
+   // Shelf-packs every texture, tallest first, into one power-of-two atlas.
    public TextureStore.Atlas packAtlas() {
       List<Entry<String, NativeImage>> sorted = new ArrayList<>(this.images.entrySet());
       sorted.sort(Comparator.<Entry<String, NativeImage>>comparingInt(entry -> entry.getValue().getHeight()).reversed());
@@ -163,7 +163,7 @@ public final class TextureStore implements AutoCloseable {
    private record Slot(int x, int y, int width, int height) {
    }
 
-   /** Takes a texture's own 0..1 UVs to where it sits in the atlas. */
+   // Takes a texture's own 0..1 UVs to where it sits in the atlas.
    public record UvTransform(float scaleU, float scaleV, float offsetU, float offsetV) {
       public static final TextureStore.UvTransform IDENTITY = new TextureStore.UvTransform(1.0F, 1.0F, 0.0F, 0.0F);
 

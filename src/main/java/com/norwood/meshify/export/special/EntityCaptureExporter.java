@@ -18,10 +18,10 @@ public final class EntityCaptureExporter {
    private EntityCaptureExporter() {
    }
 
-   /** Captures every entity in the region except players; returns how many produced geometry. */
+   // Captures every entity in the region except players; returns how many produced geometry.
    public static int export(MeshBuilder mesh, Minecraft client, ClientLevel world, BlockPos min, BlockPos max, List<String> warnings) {
       List<Entity> entities = world.getEntities((Entity) null, AABB.encapsulatingFullBlocks(min, max), entity -> !(entity instanceof Player));
-      EntityRenderDispatcher renderManager = client.getEntityRenderDispatcher();
+      EntityRenderDispatcher dispatcher = client.getEntityRenderDispatcher();
       int captured = 0;
 
       for (Entity entity : entities) {
@@ -34,8 +34,8 @@ public final class EntityCaptureExporter {
                }
             }
 
-            renderManager.submit(
-               renderManager.extractEntity(entity, 0.0F),
+            dispatcher.submit(
+               dispatcher.extractEntity(entity, 0.0F),
                BlockEntityCaptureExporter.dummyCamera(entity.blockPosition()),
                entity.getX() - min.getX(),
                entity.getY() - min.getY(),

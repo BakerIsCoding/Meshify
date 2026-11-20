@@ -72,9 +72,9 @@ public final class ObjWriter {
       }
    }
 
-   /** glTF alpha mode read from the pixels, so the special exporters get classified without extra flags. */
+   // glTF alpha mode read from the pixels, so the special exporters get classified without extra flags.
    private static AlphaMode classifyAlpha(String id, NativeImage image) {
-      // ponytail: water and lava only turn translucent through their render layer, which the pixels can't show.
+      // Water only turns translucent through its render layer, which the pixels can't show.
       if (id.startsWith("water")) {
          return AlphaMode.BLEND;
       }
@@ -148,7 +148,7 @@ public final class ObjWriter {
       }
    }
 
-   /** The 1-based OBJ index of {@code value}, adding it if it is new. */
+   // The 1-based OBJ index of value, adding it if it is new.
    private static int indexOrAdd(Map<String, Integer> indices, String value) {
       return indices.computeIfAbsent(value, v -> indices.size() + 1);
    }

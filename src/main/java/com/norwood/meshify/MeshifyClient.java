@@ -51,7 +51,7 @@ public class MeshifyClient implements ClientModInitializer {
             .then(ClientCommandManager.literal("clear").executes(always(MeshifyActions::clear)))
             .then(ClientCommandManager.literal("status").executes(ctx -> {
                ctx.getSource().sendFeedback(MeshifyActions.statusLine());
-               return 1;
+               return Command.SINGLE_SUCCESS;
             }))
             .then(ClientCommandManager.literal("cancel").executes(attempt(MeshifyActions::cancel)))
             .then(ClientCommandManager.literal("open").executes(always(MeshifyActions::openFolder)))
@@ -71,7 +71,7 @@ public class MeshifyClient implements ClientModInitializer {
       ));
    }
 
-   /** The export options offered as suggestions: every flag and every size the menu offers except the default scale. */
+   // The export options offered as suggestions: every flag and every size the menu offers except the default scale.
    private static List<OptionSuggestion> optionSuggestions() {
       List<OptionSuggestion> suggestions = new ArrayList<>();
 
@@ -98,20 +98,20 @@ public class MeshifyClient implements ClientModInitializer {
       return suggestions;
    }
 
-   /** Brigadier's convention: 1 when the command did something, 0 when it was refused. */
+   // Brigadier counts 0 as a refused command.
    private static int commandResult(boolean succeeded) {
-      return succeeded ? 1 : 0;
+      return succeeded ? Command.SINGLE_SUCCESS : 0;
    }
 
-   /** A command that always goes through. */
+   // A command that always goes through.
    private static Command<FabricClientCommandSource> always(Consumer<Feedback> action) {
       return ctx -> {
          action.accept(Feedback.of(ctx.getSource()));
-         return 1;
+         return Command.SINGLE_SUCCESS;
       };
    }
 
-   /** A command the action may refuse, reporting why. */
+   // A command the action may refuse, reporting why.
    private static Command<FabricClientCommandSource> attempt(Predicate<Feedback> action) {
       return ctx -> commandResult(action.test(Feedback.of(ctx.getSource())));
    }
@@ -119,14 +119,14 @@ public class MeshifyClient implements ClientModInitializer {
    private static int openMenu(Minecraft client) {
       // Deferred: the chat screen closes right after the command and would take the menu with it.
       client.schedule(() -> client.setScreen(new MeshifyScreen()));
-      return 1;
+      return Command.SINGLE_SUCCESS;
    }
 
    private static int export(CommandContext<FabricClientCommandSource> ctx, String name, String rawOptions) {
       return commandResult(MeshifyActions.export(Feedback.of(ctx.getSource()), name, rawOptions));
    }
 
-   /** {@code <literal>} sets the corner where the player stands, {@code <literal> x y z} sets it there. */
+   // <literal> sets the corner where the player stands, <literal> x y z sets it there.
    private static LiteralArgumentBuilder<FabricClientCommandSource> cornerCommand(String literal, Corner corner) {
       return ClientCommandManager.literal(literal)
          .executes(ctx -> setCorner(ctx.getSource(), corner, ctx.getSource().getPlayer().blockPosition()))
@@ -139,7 +139,7 @@ public class MeshifyClient implements ClientModInitializer {
          );
    }
 
-   /** {@code <blocks> [side]}, shared by expand ({@code sign} 1) and shrink ({@code sign} -1). */
+   // <blocks> [side], shared by expand (sign 1) and shrink (sign -1).
    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> resizeArgument(int sign) {
       return ClientCommandManager.argument("blocks", IntegerArgumentType.integer(1))
          .executes(ctx -> resize(ctx, sign, null))
@@ -193,7 +193,7 @@ public class MeshifyClient implements ClientModInitializer {
          source.sendFeedback(Component.translatable("meshify.msg.hint"));
       }
 
-      return 1;
+      return Command.SINGLE_SUCCESS;
    }
 
    private record OptionSuggestion(String token, String descriptionKey, Object descriptionArgument) {

@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public final class BedExporter {
-   /** Per face, four corners of {x, y, z, u, v} in model and texture pixels. */
+   // Per face, four corners of {x, y, z, u, v} in model and texture pixels.
    private static final double[][][] HEAD_QUADS = new double[][][]{
       {{0.0, 9.0, 16.0, 22.0, 22.0}, {16.0, 9.0, 16.0, 6.0, 22.0}, {16.0, 9.0, 0.0, 6.0, 6.0}, {0.0, 9.0, 0.0, 22.0, 6.0}},
       {{0.0, 3.0, 0.0, 44.0, 6.0}, {16.0, 3.0, 0.0, 28.0, 6.0}, {16.0, 3.0, 16.0, 28.0, 22.0}, {0.0, 3.0, 16.0, 44.0, 22.0}},

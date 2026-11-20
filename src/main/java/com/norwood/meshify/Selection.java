@@ -75,18 +75,18 @@ public final class Selection {
       return new BlockPos(Math.max(start.getX(), end.getX()), Math.max(start.getY(), end.getY()), Math.max(start.getZ(), end.getZ()));
    }
 
-   /** The region's size in blocks along X, Y and Z. */
+   // The region's size in blocks along X, Y and Z.
    private static BlockPos size() {
       return max().subtract(min()).offset(1, 1, 1);
    }
 
-   /** The region's size along X, Y and Z, e.g. {@code 32×18×40}. */
+   // The region's size along X, Y and Z, e.g. 32×18×40.
    public static String describeSize() {
       BlockPos size = size();
       return size.getX() + "×" + size.getY() + "×" + size.getZ();
    }
 
-   /** Stops at Long.MAX_VALUE, so coordinates typed in the billions cannot wrap around under the size limit. */
+   // Stops at Long.MAX_VALUE, so coordinates typed in the billions cannot wrap around under the size limit.
    public static long volume() {
       if (!isComplete()) {
          return 0L;
@@ -102,7 +102,7 @@ public final class Selection {
       }
    }
 
-   /** Grows the region by {@code blocks} on all six sides; a negative count shrinks it. */
+   // Grows all six sides by that many blocks; a negative count shrinks them.
    public static void expand(int blocks) {
       BlockPos lo = min();
       BlockPos hi = max();
@@ -112,7 +112,7 @@ public final class Selection {
       setBounds(new BlockPos(x[0], y[0], z[0]), new BlockPos(x[1], y[1], z[1]));
    }
 
-   /** Moves only the {@code side} face; shrinking stops at the opposite face so it never turns inside out. */
+   // Moves only the side face; shrinking stops at the opposite face so it never turns inside out.
    public static void expand(int blocks, Direction side) {
       BlockPos lo = min();
       BlockPos hi = max();
@@ -125,7 +125,7 @@ public final class Selection {
       }
    }
 
-   /** Shrinking past the middle would flip the axis, so it collapses to a single block instead. */
+   // Shrinking past the middle would flip the axis, so it collapses to a single block instead.
    private static int[] growRange(int lo, int hi, int blocks) {
       int grownLo = lo - blocks;
       int grownHi = hi + blocks;
@@ -152,7 +152,7 @@ public final class Selection {
       save();
    }
 
-   /** Keeps the selection across restarts in a Properties file: five fields need no JSON. */
+   // Keeps the selection across restarts in a Properties file: five fields need no JSON.
    public static void loadSession(Path exportRoot) {
       sessionFile = exportRoot.resolve("session.properties");
       if (!Files.exists(sessionFile)) {
@@ -221,7 +221,7 @@ public final class Selection {
       }
    }
 
-   /** Self-check, run with {@code gradlew selectionCheck}; never calls {@link #loadSession}, so it writes no file. */
+   // Self-check, run with gradlew selectionCheck; never calls loadSession, so it writes no file.
    public static void main(String[] args) {
       start = new BlockPos(0, 0, 0);
       end = new BlockPos(9, 4, 9);

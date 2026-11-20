@@ -4,7 +4,7 @@ import java.util.Arrays;
 import java.util.function.DoubleUnaryOperator;
 import net.minecraft.core.Direction;
 
-/** Entity-model cuboids and quads, in model pixels (16 to a block), turned about the block's vertical centre line. */
+// Entity-model cuboids and quads, in model pixels (16 to a block), turned about the block's vertical centre line.
 public final class BoxUv {
    private static final double PIXELS_PER_BLOCK = 16.0;
    private static final double PIVOT = PIXELS_PER_BLOCK / 2;
@@ -34,7 +34,7 @@ public final class BoxUv {
       emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, u0, v0, textureWidth, textureHeight, yawDegrees, inflate, false);
    }
 
-   /** Takes the unwrap size from the cuboid itself. */
+   // Takes the unwrap size from the cuboid itself.
    public static void emit(
       MeshBuilder mesh,
       TextureKey texture,
@@ -162,12 +162,12 @@ public final class BoxUv {
       );
    }
 
-   /** Half a turn of a face's texture, so corner 0 reads what corner 2 used to. */
+   // Half a turn of a face's texture, so corner 0 reads what corner 2 used to.
    private static float[][] rotate180(float[][] uv) {
       return new float[][]{uv[2], uv[3], uv[0], uv[1]};
    }
 
-   /** Run with {@code gradlew boxUvCheck}. */
+   // Run with gradlew boxUvCheck.
    public static void main(String[] args) {
       // Every column of the 64x64 double-chest unwrap has a different width, so a wrong face can't pass by chance.
       check(uSpan(false, 0.0F, 1.0F, 0.0F), new float[]{14.0F, 29.0F}, "default top face");
@@ -270,7 +270,7 @@ public final class BoxUv {
       mesh.addQuad(texture, positions, uv, new float[]{(float)rotatedNormal[0], (float)rotatedNormal[1], (float)rotatedNormal[2]});
    }
 
-   /** Tips a point or direction over so the model's top faces {@code up}; {@code flip} mirrors one coordinate across the block. */
+   // Tips a point or direction over so the model's top faces the up direction; flip mirrors one coordinate across the block.
    private static double[] reorient(Direction up, double x, double y, double z, DoubleUnaryOperator flip) {
       return switch (up) {
          case UP -> new double[]{x, y, z};

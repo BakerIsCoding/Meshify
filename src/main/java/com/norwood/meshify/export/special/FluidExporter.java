@@ -20,7 +20,7 @@ public final class FluidExporter {
    private FluidExporter() {
    }
 
-   /** A box up to the fluid's surface, without the faces the same fluid or a full block hides, except on the region's edge. */
+   // A box up to the fluid's surface, without the faces the same fluid or a full block hides, except on the region's edge.
    public static void export(MeshBuilder mesh, ClientLevel world, BlockPos pos, FluidState fluid, BoundingBox bounds, double blockX, double blockY, double blockZ) {
       // From 26.1 the still sprite and the tint come from the game's fluid model; Fabric registers modded fluids there too.
       //? if >=26.1 {
