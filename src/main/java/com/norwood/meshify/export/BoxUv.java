@@ -2,7 +2,7 @@ package com.norwood.meshify.export;
 
 import java.util.Arrays;
 import java.util.function.DoubleUnaryOperator;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.Direction;
 
 /** Entity-model cuboids and quads, in model pixels (16 to a block), turned about the block's vertical centre line. */
 public final class BoxUv {

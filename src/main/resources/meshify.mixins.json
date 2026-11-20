@@ -2,13 +2,14 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.norwood.meshify.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_${java}",
   "client": [
-    "RenderLayerAccessor",
     "RenderSetupAccessor",
-    "SpriteAtlasTextureAccessor",
+    "RenderTypeNameAccessor",
+    "RenderTypeStateAccessor",
     "SpriteContentsAccessor",
-    "TextureSpecAccessor"
+    "TextureAtlasAccessor",
+    "TextureBindingAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

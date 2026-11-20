@@ -1,5 +1,6 @@
 package com.norwood.meshify.export;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import com.norwood.meshify.export.GlbWriter.AlphaMode;
 import com.norwood.meshify.export.TextureStore.UvTransform;
 import java.io.IOException;
@@ -13,14 +14,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Consumer;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
+import net.minecraft.client.Minecraft;
 
 public final class ObjWriter {
    private ObjWriter() {
    }
 
-   public static void write(MinecraftClient client, Path outputDir, ExportOptions options, MeshBuilder mesh, List<String> warnings, Consumer<ExportStage> onStage)
+   public static void write(Minecraft client, Path outputDir, ExportOptions options, MeshBuilder mesh, List<String> warnings, Consumer<ExportStage> onStage)
       throws IOException {
       onStage.accept(ExportStage.TEXTURES);
       Files.createDirectories(outputDir);
@@ -37,7 +37,7 @@ public final class ObjWriter {
             Files.createDirectories(textureDir);
 
             for (Entry<String, NativeImage> texture : textures.images().entrySet()) {
-               texture.getValue().writeTo(textureDir.resolve(texture.getKey() + ".png"));
+               texture.getValue().writeToFile(textureDir.resolve(texture.getKey() + ".png"));
             }
 
             warnings.add("no .glb written: it needs a single atlas, so drop the 'separate' option");
@@ -45,7 +45,7 @@ public final class ObjWriter {
             TextureStore.Atlas atlas = textures.packAtlas();
             uvs = atlas.uvs();
             Path atlasPath = outputDir.resolve("atlas.png");
-            atlas.image().writeTo(atlasPath);
+            atlas.image().writeToFile(atlasPath);
             onStage.accept(ExportStage.GLB);
             writeGlb(outputDir, options, mesh, uvs, textures, Files.readAllBytes(atlasPath), warnings);
          }
@@ -83,7 +83,7 @@ public final class ObjWriter {
 
       for (int y = 0; y < image.getHeight(); y++) {
          for (int x = 0; x < image.getWidth(); x++) {
-            int alpha = image.getColorArgb(x, y) >>> 24;
+            int alpha = image.getPixel(x, y) >>> 24;
             if (alpha != 0xFF) {
                if (alpha != 0) {
                   return AlphaMode.BLEND;

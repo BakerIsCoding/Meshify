@@ -1,15 +1,15 @@
 package com.norwood.meshify.export.special;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.norwood.meshify.export.MeshBuilder;
 import java.util.List;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.block.entity.BlockEntityRenderManager;
-import net.minecraft.client.render.block.entity.state.BlockEntityRenderState;
-import net.minecraft.client.render.state.CameraRenderState;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
+import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
+import net.minecraft.client.renderer.state.CameraRenderState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /** Runs a block entity's own renderer into a {@link CaptureQueue}, for block entities no special exporter handles. */
@@ -17,23 +17,28 @@ public final class BlockEntityCaptureExporter {
    private BlockEntityCaptureExporter() {
    }
 
-   public static boolean export(MeshBuilder mesh, MinecraftClient client, BlockPos pos, BlockEntity blockEntity, double blockX, double blockY, double blockZ, List<String> warnings) {
-      BlockEntityRenderManager renderManager = client.getBlockEntityRenderDispatcher();
+   public static boolean export(MeshBuilder mesh, Minecraft client, BlockPos pos, BlockEntity blockEntity, double blockX, double blockY, double blockZ, List<String> warnings) {
+      BlockEntityRenderDispatcher renderManager = client.getBlockEntityRenderDispatcher();
 
       try {
-         if (renderManager.get(blockEntity) == null) {
+         var renderer = renderManager.getRenderer(blockEntity);
+         if (renderer == null) {
             return false;
          }
 
-         BlockEntityRenderState state = renderManager.getRenderState(blockEntity, 0.0F, null);
+         // From 26.2 extraction only succeeds when the flag matches how the renderer wants to be drawn.
+         //? if >=26.2 {
+         /*BlockEntityRenderState state = renderManager.tryExtractRenderState(blockEntity, 0.0F, null, renderer.shouldRenderOffScreen());
+         *///?} else
+         BlockEntityRenderState state = renderManager.tryExtractRenderState(blockEntity, 0.0F, null);
          if (state == null) {
             return false;
          }
 
-         MatrixStack matrices = new MatrixStack();
+         PoseStack matrices = new PoseStack();
          matrices.translate(blockX, blockY, blockZ);
          CaptureQueue queue = new CaptureQueue(mesh, client, warnings);
-         renderManager.render(state, matrices, queue, dummyCamera(pos));
+         renderManager.submit(state, matrices, queue, dummyCamera(pos));
          return queue.capturedQuads > 0;
       } catch (Exception exception) {
          warnings.add("BER capture failed @ " + pos.toShortString() + " (" + blockEntity.getType() + "): " + exception);
@@ -45,8 +50,9 @@ public final class BlockEntityCaptureExporter {
    static CameraRenderState dummyCamera(BlockPos pos) {
       CameraRenderState camera = new CameraRenderState();
       camera.initialized = true;
-      camera.pos = new Vec3d(pos.getX() + 0.5, pos.getY() + 1.5, pos.getZ() + 4.0);
-      camera.blockPos = BlockPos.ofFloored(camera.pos);
+      camera.pos = new Vec3(pos.getX() + 0.5, pos.getY() + 1.5, pos.getZ() + 4.0);
+      camera.blockPos = BlockPos.containing(camera.pos);
+      //? if <26.1
       camera.entityPos = camera.pos;
       camera.orientation = new Quaternionf();
       return camera;

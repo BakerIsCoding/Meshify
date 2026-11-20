@@ -6,4 +6,20 @@ pluginManagement {
 	}
 }
 
+plugins {
+	id 'dev.kikugie.stonecutter' version '0.9.8'
+	// Downloads the JDK a version needs (26.x builds with Java 25) when it is not installed.
+	id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+stonecutter {
+	kotlinController = false
+	centralScript = 'build.gradle'
+	create(rootProject) {
+		versions '1.21.10', '1.21.11', '26.1', '26.2', '26.3'
+		// The version src/ is written for; commit with this one active.
+		vcsVersion = '1.21.11'
+	}
+}
+
 rootProject.name = "meshify"

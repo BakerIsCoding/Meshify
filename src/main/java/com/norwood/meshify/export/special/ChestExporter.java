@@ -3,28 +3,28 @@ package com.norwood.meshify.export.special;
 import com.norwood.meshify.export.BoxUv;
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.ChestType;
 
 public final class ChestExporter {
    private ChestExporter() {
    }
 
    public static void export(MeshBuilder mesh, BlockState state, double blockX, double blockY, double blockZ) {
-      double yaw = Yaw.of(state.get(Properties.HORIZONTAL_FACING).getOpposite());
+      double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING).getOpposite());
       boolean ender = state.getBlock() == Blocks.ENDER_CHEST;
-      ChestType type = !ender && state.contains(ChestBlock.CHEST_TYPE) ? state.get(ChestBlock.CHEST_TYPE) : ChestType.SINGLE;
+      ChestType type = !ender && state.hasProperty(ChestBlock.TYPE) ? state.getValue(ChestBlock.TYPE) : ChestType.SINGLE;
       String kind = ender ? "ender" : (state.getBlock() == Blocks.TRAPPED_CHEST ? "trapped" : "normal");
       String half = switch (type) {
          case LEFT -> "_left";
          case RIGHT -> "_right";
          case SINGLE -> "";
       };
-      TextureKey texture = TextureKey.resource(Identifier.ofVanilla("textures/entity/chest/" + kind + half + ".png"));
+      TextureKey texture = TextureKey.resource(Identifier.withDefaultNamespace("textures/entity/chest/" + kind + half + ".png"));
       switch (type) {
          case SINGLE -> {
             uprightBox(mesh, texture, blockX, blockY, blockZ, 1.0, 0.0, 1.0, 15.0, 10.0, 15.0, 0, 19, yaw);

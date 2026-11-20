@@ -1,0 +1,7 @@
+plugins {
+	id 'dev.kikugie.stonecutter'
+	// Both Loom plugin ids live in this one artifact; build.gradle picks one per version.
+	id 'net.fabricmc.fabric-loom' version "${loom_version}" apply false
+}
+
+stonecutter.active '1.21.11'

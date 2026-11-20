@@ -1,13 +1,13 @@
 package com.norwood.meshify.export;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
+import net.minecraft.client.Minecraft;
 
 public final class TextureStore implements AutoCloseable {
    /** Edge pixels repeated around each atlas entry, so sampling never bleeds in a neighbour. */
@@ -17,12 +17,12 @@ public final class TextureStore implements AutoCloseable {
    private static final int PLACEHOLDER_CHECKER = 8;
    private static final int PLACEHOLDER_MAGENTA = 0xFFFF00FF;
    private static final int PLACEHOLDER_BLACK = 0xFF000000;
-   private final MinecraftClient client;
+   private final Minecraft client;
    private final int scale;
    private final Map<String, NativeImage> images = new LinkedHashMap<>();
    private NativeImage atlasImage;
 
-   public TextureStore(MinecraftClient client, int scale) {
+   public TextureStore(Minecraft client, int scale) {
       this.client = client;
       this.scale = scale;
    }
@@ -52,7 +52,7 @@ public final class TextureStore implements AutoCloseable {
 
       for (int y = 0; y < scaled.getHeight(); y++) {
          for (int x = 0; x < scaled.getWidth(); x++) {
-            scaled.setColorArgb(x, y, source.getColorArgb(x / factor, y / factor));
+            scaled.setPixel(x, y, source.getPixel(x / factor, y / factor));
          }
       }
 
@@ -66,7 +66,7 @@ public final class TextureStore implements AutoCloseable {
       for (int y = 0; y < PLACEHOLDER_SIZE; y++) {
          for (int x = 0; x < PLACEHOLDER_SIZE; x++) {
             boolean magenta = (x / PLACEHOLDER_CHECKER + y / PLACEHOLDER_CHECKER) % 2 == 0;
-            image.setColorArgb(x, y, magenta ? PLACEHOLDER_MAGENTA : PLACEHOLDER_BLACK);
+            image.setPixel(x, y, magenta ? PLACEHOLDER_MAGENTA : PLACEHOLDER_BLACK);
          }
       }
 
@@ -119,7 +119,7 @@ public final class TextureStore implements AutoCloseable {
             int srcY = Math.clamp(dy, 0, slot.height() - 1);
 
             for (int dx = -PADDING; dx < slot.width() + PADDING; dx++) {
-               atlas.setColorArgb(slot.x() + dx, slot.y() + dy, image.getColorArgb(Math.clamp(dx, 0, slot.width() - 1), srcY));
+               atlas.setPixel(slot.x() + dx, slot.y() + dy, image.getPixel(Math.clamp(dx, 0, slot.width() - 1), srcY));
             }
          }
 

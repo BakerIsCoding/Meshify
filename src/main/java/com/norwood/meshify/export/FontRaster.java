@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mojang.blaze3d.platform.NativeImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -13,10 +14,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.resource.Resource;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.Resource;
 
 /** Rasterises sign text with Minecraft's own bitmap font, which covers Latin, Greek and Cyrillic, one texel per font unit. */
 public final class FontRaster {
@@ -34,7 +34,7 @@ public final class FontRaster {
    private FontRaster() {
    }
 
-   public static synchronized boolean ensureLoaded(MinecraftClient client, List<String> warnings) {
+   public static synchronized boolean ensureLoaded(Minecraft client, List<String> warnings) {
       if (glyphs != null) {
          return true;
       } else if (loadFailed) {
@@ -56,7 +56,7 @@ public final class FontRaster {
       return codePoint == ' ' || glyphs != null && glyphs.containsKey(codePoint);
    }
 
-   private static Map<Integer, FontRaster.Glyph> loadGlyphs(MinecraftClient client) throws IOException {
+   private static Map<Integer, FontRaster.Glyph> loadGlyphs(Minecraft client) throws IOException {
       Map<Integer, FontRaster.Glyph> loaded = new HashMap<>(1024);
 
       for (JsonObject provider : bitmapProviders(client)) {
@@ -72,12 +72,12 @@ public final class FontRaster {
    }
 
    /** The bitmap providers of the default font stack, highest priority first. */
-   private static List<JsonObject> bitmapProviders(MinecraftClient client) throws IOException {
-      Identifier fontId = Identifier.ofVanilla("font/include/default.json");
+   private static List<JsonObject> bitmapProviders(Minecraft client) throws IOException {
+      Identifier fontId = Identifier.withDefaultNamespace("font/include/default.json");
       Resource resource = client.getResourceManager().getResource(fontId).orElseThrow(() -> new IOException("not found: " + fontId));
       List<JsonObject> providers = new ArrayList<>();
 
-      try (InputStream in = resource.getInputStream()) {
+      try (InputStream in = resource.open()) {
          JsonArray all = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonArray("providers");
          if (all != null) {
             for (JsonElement element : all) {
@@ -97,9 +97,9 @@ public final class FontRaster {
    }
 
    /** Cuts one sheet into glyphs, keeping only a one-bit-per-pixel mask. */
-   private static void readSheet(MinecraftClient client, JsonObject provider, Map<Integer, FontRaster.Glyph> loaded) throws IOException {
-      Identifier file = Identifier.of(provider.get("file").getAsString());
-      Optional<Resource> sheetResource = client.getResourceManager().getResource(Identifier.of(file.getNamespace(), "textures/" + file.getPath()));
+   private static void readSheet(Minecraft client, JsonObject provider, Map<Integer, FontRaster.Glyph> loaded) throws IOException {
+      Identifier file = Identifier.parse(provider.get("file").getAsString());
+      Optional<Resource> sheetResource = client.getResourceManager().getResource(Identifier.fromNamespaceAndPath(file.getNamespace(), "textures/" + file.getPath()));
       if (sheetResource.isEmpty()) {
          return;
       }
@@ -120,7 +120,7 @@ public final class FontRaster {
       int height = provider.has("height") ? provider.get("height").getAsInt() : DEFAULT_GLYPH_HEIGHT;
       int ascent = provider.get("ascent").getAsInt();
 
-      try (InputStream in = sheetResource.get().getInputStream(); NativeImage sheet = NativeImage.read(in)) {
+      try (InputStream in = sheetResource.get().open(); NativeImage sheet = NativeImage.read(in)) {
          int cellWidth = sheet.getWidth() / columns;
          int cellHeight = sheet.getHeight() / rows;
          if (cellWidth < 1 || cellWidth > MAX_CELL_WIDTH || cellHeight < 1) {
@@ -146,7 +146,7 @@ public final class FontRaster {
          int mask = 0;
 
          for (int column = 0; column < cellWidth; column++) {
-            if ((sheet.getColorArgb(x + column, y + row) >>> 24) != 0) {
+            if ((sheet.getPixel(x + column, y + row) >>> 24) != 0) {
                mask |= 1 << cellWidth - 1 - column;
                width = Math.max(width, column + 1);
             }
@@ -215,7 +215,7 @@ public final class FontRaster {
          for (int dx = 0; dx < width; dx++) {
             int x = penX + dx;
             if ((mask & 1 << glyph.cellWidth() - 1 - dx * glyph.cellHeight() / height) != 0 && x >= 0 && x < canvas.getWidth()) {
-               canvas.setColorArgb(x, y, argb);
+               canvas.setPixel(x, y, argb);
             }
          }
       }

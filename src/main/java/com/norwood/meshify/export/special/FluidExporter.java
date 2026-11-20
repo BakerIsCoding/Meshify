@@ -2,30 +2,47 @@ package com.norwood.meshify.export.special;
 
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
+//? if >=26.1 {
+/*import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.block.FluidModel;
+*///?} else {
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry;
-import net.minecraft.client.texture.Sprite;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.util.math.BlockBox;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+//?}
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.material.FluidState;
 
 public final class FluidExporter {
    private FluidExporter() {
    }
 
    /** A box up to the fluid's surface, without the faces the same fluid or a full block hides, except on the region's edge. */
-   public static void export(MeshBuilder mesh, ClientWorld world, BlockPos pos, FluidState fluid, BlockBox bounds, double blockX, double blockY, double blockZ) {
-      FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getFluid());
-      Sprite[] sprites = handler == null ? null : handler.getFluidSprites(world, pos, fluid);
+   public static void export(MeshBuilder mesh, ClientLevel world, BlockPos pos, FluidState fluid, BoundingBox bounds, double blockX, double blockY, double blockZ) {
+      // From 26.1 the still sprite and the tint come from the game's fluid model; Fabric registers modded fluids there too.
+      //? if >=26.1 {
+      /*FluidModel model = Minecraft.getInstance().getModelManager().getFluidStateModelSet().get(fluid);
+      TextureAtlasSprite still = model == null ? null : model.stillMaterial().sprite();
+      if (still == null) {
+         return;
+      }
+
+      int tint = model.tintSource() != null ? model.tintSource().colorInWorld(world.getBlockState(pos), world, pos) : -1;
+      TextureKey texture = TextureKey.sprite(still, tint);
+      *///?} else {
+      FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluid.getType());
+      TextureAtlasSprite[] sprites = handler == null ? null : handler.getFluidSprites(world, pos, fluid);
       if (sprites == null || sprites.length == 0 || sprites[0] == null) {
          return;
       }
 
       TextureKey texture = TextureKey.sprite(sprites[0], handler.getFluidColor(world, pos, fluid));
+      //?}
       // Under more of the same fluid the column is full height, with no surface of its own.
-      boolean submerged = sameFluid(world, pos.up(), fluid);
+      boolean submerged = sameFluid(world, pos.above(), fluid);
       float height = submerged ? 1.0F : fluid.getHeight(world, pos);
       float sideTop = 1.0F - height;
       float[][] sideUv = new float[][]{{0.0F, 1.0F}, {1.0F, 1.0F}, {1.0F, sideTop}, {0.0F, sideTop}};
@@ -108,17 +125,17 @@ public final class FluidExporter {
       }
    }
 
-   private static boolean sameFluid(ClientWorld world, BlockPos pos, FluidState fluid) {
-      return world.getFluidState(pos).getFluid().matchesType(fluid.getFluid());
+   private static boolean sameFluid(ClientLevel world, BlockPos pos, FluidState fluid) {
+      return world.getFluidState(pos).getType().isSame(fluid.getType());
    }
 
-   private static boolean shouldDraw(ClientWorld world, BlockPos pos, Direction side, FluidState fluid, BlockBox bounds) {
-      BlockPos neighbor = pos.offset(side);
-      if (!bounds.contains(neighbor)) {
+   private static boolean shouldDraw(ClientLevel world, BlockPos pos, Direction side, FluidState fluid, BoundingBox bounds) {
+      BlockPos neighbor = pos.relative(side);
+      if (!bounds.isInside(neighbor)) {
          return true;
       }
 
-      return !sameFluid(world, neighbor, fluid) && !world.getBlockState(neighbor).isOpaqueFullCube();
+      return !sameFluid(world, neighbor, fluid) && !world.getBlockState(neighbor).isSolidRender();
    }
 
    private static void addQuad(MeshBuilder mesh, TextureKey texture, double blockX, double blockY, double blockZ, float[][] corners, float[][] uv, float[] normal) {

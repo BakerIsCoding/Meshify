@@ -13,17 +13,20 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.text.Text;
-import net.minecraft.text.Texts;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentUtils;
+//? if >=26.3 {
+/*import com.mojang.blaze3d.Blaze3D;
+*///?} else
 import net.minecraft.util.Util;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockBox;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 
 /** Actions shared by the /meshify commands and the menu, so both behave the same. */
 final class MeshifyActions {
@@ -49,7 +52,7 @@ final class MeshifyActions {
    }
 
    /** Where an action reports back: the chat for commands, the status line for the menu. */
-   record Feedback(Consumer<Text> onInfo, Consumer<Text> onError) {
+   record Feedback(Consumer<Component> onInfo, Consumer<Component> onError) {
       static final Feedback IGNORE = new Feedback(text -> {
       }, text -> {
       });
@@ -58,48 +61,48 @@ final class MeshifyActions {
          return new Feedback(source::sendFeedback, source::sendError);
       }
 
-      void info(Text text) {
+      void info(Component text) {
          this.onInfo.accept(text);
       }
 
-      void error(Text text) {
+      void error(Component text) {
          this.onError.accept(text);
       }
    }
 
    /** The block under the crosshair, or the one the player is standing on when aiming at nothing. */
-   static BlockPos targetedBlock(MinecraftClient client) {
-      return client.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+   static BlockPos targetedBlock(Minecraft client) {
+      return client.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
          ? hit.getBlockPos()
-         : client.player.getBlockPos();
+         : client.player.blockPosition();
    }
 
    /** A corner's coordinates, or "unset". */
-   static Text describeCorner(BlockPos pos) {
-      return pos == null ? Text.translatable("meshify.label.unset") : Text.literal(pos.toShortString());
+   static Component describeCorner(BlockPos pos) {
+      return pos == null ? Component.translatable("meshify.label.unset") : Component.literal(pos.toShortString());
    }
 
    static void setCorner(Feedback feedback, Corner corner, BlockPos pos) {
-      Selection.set(corner, pos, MinecraftClient.getInstance().world.getRegistryKey());
-      Text label = Text.translatable(corner.labelKey);
+      Selection.set(corner, pos, Minecraft.getInstance().level.dimension());
+      Component label = Component.translatable(corner.labelKey);
       feedback.info(
          Selection.isComplete()
-            ? Text.translatable("meshify.msg.pos_set_volume", label, pos.toShortString(), Selection.describeSize(), Selection.volume())
-            : Text.translatable("meshify.msg.pos_set", label, pos.toShortString())
+            ? Component.translatable("meshify.msg.pos_set_volume", label, pos.toShortString(), Selection.describeSize(), Selection.volume())
+            : Component.translatable("meshify.msg.pos_set", label, pos.toShortString())
       );
    }
 
    static void selectSingleBlock(Feedback feedback) {
-      MinecraftClient client = MinecraftClient.getInstance();
+      Minecraft client = Minecraft.getInstance();
       BlockPos pos = targetedBlock(client);
-      Selection.set(Corner.START, pos, client.world.getRegistryKey());
-      Selection.set(Corner.END, pos, client.world.getRegistryKey());
-      feedback.info(Text.translatable("meshify.msg.here", pos.toShortString()));
+      Selection.set(Corner.START, pos, client.level.dimension());
+      Selection.set(Corner.END, pos, client.level.dimension());
+      feedback.info(Component.translatable("meshify.msg.here", pos.toShortString()));
    }
 
    static void clear(Feedback feedback) {
       Selection.clear();
-      feedback.info(Text.translatable("meshify.msg.cleared"));
+      feedback.info(Component.translatable("meshify.msg.cleared"));
    }
 
    /** Grows (or, for negative {@code blocks}, shrinks) every side, or only {@code sideName}. */
@@ -113,7 +116,7 @@ final class MeshifyActions {
       } else {
          Direction side = parseSide(sideName);
          if (side == null) {
-            feedback.error(Text.translatable("meshify.error.unknown_direction", sideName));
+            feedback.error(Component.translatable("meshify.error.unknown_direction", sideName));
             return false;
          }
 
@@ -126,7 +129,7 @@ final class MeshifyActions {
 
    private static Direction parseSide(String name) {
       String side = name.toLowerCase(Locale.ROOT);
-      return side.equals(FACING) ? Direction.getEntityFacingOrder(MinecraftClient.getInstance().player)[0] : Direction.byId(side);
+      return side.equals(FACING) ? Direction.orderedByNearest(Minecraft.getInstance().player)[0] : Direction.byName(side);
    }
 
    static boolean expandVertical(Feedback feedback) {
@@ -134,33 +137,33 @@ final class MeshifyActions {
          return false;
       }
 
-      ClientWorld world = MinecraftClient.getInstance().world;
-      Selection.expandVertical(world.getBottomY(), world.getBottomY() + world.getHeight() - 1);
+      ClientLevel world = Minecraft.getInstance().level;
+      Selection.expandVertical(world.getMinY(), world.getMinY() + world.getHeight() - 1);
       feedback.info(resizedMessage());
       return true;
    }
 
    /** Shrinks the region to the blocks actually in it, dropping the air around them. */
    static boolean trim(Feedback feedback) {
-      ClientWorld world = MinecraftClient.getInstance().world;
+      ClientLevel world = Minecraft.getInstance().level;
       if (!requireSelection(feedback) || !requireSameDimension(feedback, world)) {
          return false;
       }
 
       int unloadedChunks = RegionExporter.countUnloadedChunks(world, Selection.min(), Selection.max());
       if (unloadedChunks > 0) {
-         feedback.error(Text.translatable("meshify.error.trim_unloaded", unloadedChunks));
+         feedback.error(Component.translatable("meshify.error.trim_unloaded", unloadedChunks));
          return false;
       }
 
-      Optional<BlockBox> bounds = RegionExporter.solidBounds(world, Selection.min(), Selection.max());
+      Optional<BoundingBox> bounds = RegionExporter.solidBounds(world, Selection.min(), Selection.max());
       if (bounds.isEmpty()) {
-         feedback.error(Text.translatable("meshify.error.trim_empty"));
+         feedback.error(Component.translatable("meshify.error.trim_empty"));
          return false;
       }
 
-      BlockBox box = bounds.get();
-      Selection.setBounds(new BlockPos(box.getMinX(), box.getMinY(), box.getMinZ()), new BlockPos(box.getMaxX(), box.getMaxY(), box.getMaxZ()));
+      BoundingBox box = bounds.get();
+      Selection.setBounds(new BlockPos(box.minX(), box.minY(), box.minZ()), new BlockPos(box.maxX(), box.maxY(), box.maxZ()));
       feedback.info(resizedMessage());
       return true;
    }
@@ -170,75 +173,78 @@ final class MeshifyActions {
          return true;
       }
 
-      feedback.error(Text.translatable("meshify.error.no_selection"));
+      feedback.error(Component.translatable("meshify.error.no_selection"));
       return false;
    }
 
-   private static boolean requireSameDimension(Feedback feedback, ClientWorld world) {
-      if (Selection.matchesDimension(world.getRegistryKey())) {
+   private static boolean requireSameDimension(Feedback feedback, ClientLevel world) {
+      if (Selection.matchesDimension(world.dimension())) {
          return true;
       }
 
-      feedback.error(Text.translatable("meshify.error.wrong_dimension", Selection.dimension.getValue().toString()));
+      feedback.error(Component.translatable("meshify.error.wrong_dimension", Selection.dimension.identifier().toString()));
       return false;
    }
 
-   private static Text resizedMessage() {
-      return Text.translatable(
+   private static Component resizedMessage() {
+      return Component.translatable(
          "meshify.msg.resized", Selection.min().toShortString(), Selection.max().toShortString(), Selection.describeSize(), Selection.volume()
       );
    }
 
-   static Text statusLine() {
-      Text start = describeCorner(Selection.start);
-      Text end = describeCorner(Selection.end);
+   static Component statusLine() {
+      Component start = describeCorner(Selection.start);
+      Component end = describeCorner(Selection.end);
       return Selection.isComplete()
-         ? Text.translatable("meshify.msg.status_volume", start, end, Selection.describeSize(), Selection.volume())
-         : Text.translatable("meshify.msg.status", start, end);
+         ? Component.translatable("meshify.msg.status_volume", start, end, Selection.describeSize(), Selection.volume())
+         : Component.translatable("meshify.msg.status", start, end);
    }
 
    static boolean cancel(Feedback feedback) {
       if (!ExportJob.cancel()) {
-         feedback.error(Text.translatable("meshify.error.not_running"));
+         feedback.error(Component.translatable("meshify.error.not_running"));
          return false;
       }
 
-      feedback.info(Text.translatable("meshify.msg.cancelling"));
+      feedback.info(Component.translatable("meshify.msg.cancelling"));
       return true;
    }
 
    static void openFolder(Feedback feedback) {
-      Path root = RegionExporter.exportRoot(MinecraftClient.getInstance());
+      Path root = RegionExporter.exportRoot(Minecraft.getInstance());
       root.toFile().mkdirs();
-      Util.getOperatingSystem().open(root);
-      feedback.info(Text.translatable("meshify.msg.open_folder", ExportJob.folderLink(root)));
+      //? if >=26.3 {
+      /*Blaze3D.openPath(root);
+      *///?} else
+      Util.getPlatform().openPath(root);
+      feedback.info(Component.translatable("meshify.msg.open_folder", ExportJob.folderLink(root)));
    }
 
    /** Starts an export of the selection; a blank {@code rawOptions} reuses the previous run's options. */
    static boolean export(Feedback feedback, String name, String rawOptions) {
       if (ExportJob.isRunning()) {
-         feedback.error(Text.translatable("meshify.error.busy"));
+         feedback.error(Component.translatable("meshify.error.busy"));
          return false;
       }
 
-      MinecraftClient client = MinecraftClient.getInstance();
-      if (!requireSelection(feedback) || !requireSameDimension(feedback, client.world)) {
+      Minecraft client = Minecraft.getInstance();
+      if (!requireSelection(feedback) || !requireSameDimension(feedback, client.level)) {
          return false;
       }
 
       long volume = Selection.volume();
       if (volume > RegionExporter.MAX_VOLUME) {
-         feedback.error(Text.translatable("meshify.error.too_large", volume, RegionExporter.MAX_VOLUME));
+         feedback.error(Component.translatable("meshify.error.too_large", volume, RegionExporter.MAX_VOLUME));
          return false;
       }
 
-      int unloadedChunks = RegionExporter.countUnloadedChunks(client.world, Selection.min(), Selection.max());
+      int unloadedChunks = RegionExporter.countUnloadedChunks(client.level, Selection.min(), Selection.max());
       if (unloadedChunks > 0) {
-         feedback.info(Text.translatable("meshify.msg.pre_unloaded", unloadedChunks).formatted(Formatting.YELLOW));
+         feedback.info(Component.translatable("meshify.msg.pre_unloaded", unloadedChunks).withStyle(ChatFormatting.YELLOW));
       }
 
       if (volume > WARN_ABOVE_VOLUME) {
-         feedback.info(Text.translatable("meshify.msg.pre_large", volume).formatted(Formatting.YELLOW));
+         feedback.info(Component.translatable("meshify.msg.pre_large", volume).withStyle(ChatFormatting.YELLOW));
       }
 
       boolean reusingOptions = false;
@@ -254,10 +260,10 @@ final class MeshifyActions {
       ExportOptions options = parseOptions(uniqueName(client, sanitizeName(name)), rawOptions, feedback);
       Selection.rememberOptions(rawOptions);
       if (reusingOptions) {
-         feedback.info(Text.translatable("meshify.msg.reused_options", rawOptions).formatted(Formatting.GRAY));
+         feedback.info(Component.translatable("meshify.msg.reused_options", rawOptions).withStyle(ChatFormatting.GRAY));
       }
 
-      feedback.info(Text.translatable("meshify.msg.export_start", volume, describeOptions(options)));
+      feedback.info(Component.translatable("meshify.msg.export_start", volume, describeOptions(options)));
       ExportJob.start(Selection.start, Selection.end, options);
       return true;
    }
@@ -300,7 +306,7 @@ final class MeshifyActions {
                      textureScale = Math.clamp(Integer.parseInt(token), 1, HIGHEST_TEXTURE_SCALE);
                   }
                } catch (NumberFormatException notANumber) {
-                  feedback.info(Text.translatable("meshify.error.unknown_option", token).formatted(Formatting.YELLOW));
+                  feedback.info(Component.translatable("meshify.error.unknown_option", token).withStyle(ChatFormatting.YELLOW));
                }
             }
          }
@@ -339,7 +345,7 @@ final class MeshifyActions {
    }
 
    /** Never clobbers a previous export: {@code shop}, then {@code shop_2}, {@code shop_3}… */
-   private static String uniqueName(MinecraftClient client, String name) {
+   private static String uniqueName(Minecraft client, String name) {
       Path root = RegionExporter.exportRoot(client);
       String candidate = name;
 
@@ -350,26 +356,26 @@ final class MeshifyActions {
       return candidate;
    }
 
-   private static Text describeOptions(ExportOptions options) {
-      List<Text> parts = new ArrayList<>();
-      parts.add(Text.translatable(options.mergeAtlas() ? "meshify.opt.atlas" : "meshify.opt.separate"));
+   private static Component describeOptions(ExportOptions options) {
+      List<Component> parts = new ArrayList<>();
+      parts.add(Component.translatable(options.mergeAtlas() ? "meshify.opt.atlas" : "meshify.opt.separate"));
       if (options.textureScale() > 1) {
-         parts.add(Text.translatable("meshify.opt.scale", options.textureScale()));
+         parts.add(Component.translatable("meshify.opt.scale", options.textureScale()));
       }
 
       if (options.bake()) {
-         parts.add(Text.translatable("meshify.opt.bake", options.bakeUvSize(), options.bakeMaxAtlas()));
+         parts.add(Component.translatable("meshify.opt.bake", options.bakeUvSize(), options.bakeMaxAtlas()));
       }
 
       if (options.weldVertices()) {
-         parts.add(Text.translatable("meshify.opt.weld"));
+         parts.add(Component.translatable("meshify.opt.weld"));
       }
 
       if (options.aggressiveCull()) {
-         parts.add(Text.translatable("meshify.opt.cull"));
+         parts.add(Component.translatable("meshify.opt.cull"));
       }
 
-      return Texts.join(parts, Text.literal(", "));
+      return ComponentUtils.formatList(parts, Component.literal(", "));
    }
 
    /** Self-check, run with {@code gradlew optionsCheck}. */
@@ -383,7 +389,7 @@ final class MeshifyActions {
 
       for (ExportOptions options : cases) {
          String formatted = formatOptions(options);
-         Consumer<Text> reject = text -> {
+         Consumer<Component> reject = text -> {
             throw new AssertionError("options self-check: '" + formatted + "' has a token the parser rejects");
          };
          ExportOptions parsed = parseOptions("check", formatted, new Feedback(reject, reject));

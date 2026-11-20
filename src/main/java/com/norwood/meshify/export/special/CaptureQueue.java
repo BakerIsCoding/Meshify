@@ -1,55 +1,75 @@
 package com.norwood.meshify.export.special;
 
-import com.mojang.blaze3d.vertex.VertexFormat.DrawMode;
+import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+//? if >=26.3 {
+/*import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+*///?} elif >=26.2 {
+/*import com.mojang.blaze3d.PrimitiveTopology;
+*///?} else
+import com.mojang.blaze3d.vertex.VertexFormat.Mode;
+import com.norwood.meshify.export.BakedQuads;
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.RegionExporter;
 import com.norwood.meshify.export.TextureKey;
-import com.norwood.meshify.mixin.RenderLayerAccessor;
 import com.norwood.meshify.mixin.RenderSetupAccessor;
-import com.norwood.meshify.mixin.SpriteAtlasTextureAccessor;
-import com.norwood.meshify.mixin.TextureSpecAccessor;
+import com.norwood.meshify.mixin.RenderTypeNameAccessor;
+import com.norwood.meshify.mixin.RenderTypeStateAccessor;
+import com.norwood.meshify.mixin.TextureAtlasAccessor;
+import com.norwood.meshify.mixin.TextureBindingAccessor;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.MapColor;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer.TextLayerType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font.DisplayMode;
 import net.minecraft.client.model.Model;
-import net.minecraft.client.model.ModelPart;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.RenderSetup;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.block.MovingBlockRenderState;
-import net.minecraft.client.render.command.OrderedRenderCommandQueue;
-import net.minecraft.client.render.command.RenderCommandQueue;
-import net.minecraft.client.render.command.ModelCommandRenderer.CrumblingOverlayCommand;
-import net.minecraft.client.render.command.OrderedRenderCommandQueue.Custom;
-import net.minecraft.client.render.command.OrderedRenderCommandQueue.LayeredCustom;
-import net.minecraft.client.render.entity.state.EntityRenderState;
-import net.minecraft.client.render.entity.state.EntityRenderState.LeashData;
-import net.minecraft.client.render.entity.state.EntityRenderState.ShadowPiece;
-import net.minecraft.client.render.item.ItemRenderState.Glint;
-import net.minecraft.client.render.model.BakedQuad;
-import net.minecraft.client.render.model.BlockModelPart;
-import net.minecraft.client.render.model.BlockStateModel;
-import net.minecraft.client.render.state.CameraRenderState;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.Sprite;
-import net.minecraft.client.texture.SpriteAtlasTexture;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.util.math.Vector2f;
-import net.minecraft.component.type.MapIdComponent;
-import net.minecraft.item.ItemDisplayContext;
-import net.minecraft.item.map.MapState;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.random.Random;
+import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.client.renderer.OrderedSubmitNodeCollector;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.block.MovingBlockRenderState;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.block.model.BlockStateModel;
+//? if >=26.1 {
+/*import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+*///?} else {
+import net.minecraft.client.renderer.block.model.BlockModelPart;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.state.BlockState;
+//?}
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.entity.state.EntityRenderState.LeashState;
+import net.minecraft.client.renderer.entity.state.EntityRenderState.ShadowPiece;
+//? if <1.21.11
+/*import net.minecraft.client.renderer.entity.state.HitboxesRenderState;*/
+import net.minecraft.client.renderer.feature.ModelFeatureRenderer.CrumblingOverlay;
+import net.minecraft.client.renderer.item.ItemStackRenderState.FoilType;
+//? if >=1.21.11
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.CameraRenderState;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+//? if >=26.2 {
+/*import net.minecraft.client.renderer.gizmos.DrawableGizmoPrimitives;
+import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
+import net.minecraft.world.phys.shapes.VoxelShape;
+*///?}
+//? if >=26.3 {
+/*import net.minecraft.client.renderer.texture.UvMapping;
+import net.minecraft.client.resources.model.geometry.ItemQuads;
+*///?}
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.saveddata.maps.MapId;
+import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -57,29 +77,29 @@ import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
 /** Stands in for the game's render queue, so block-entity and entity renderers draw into the mesh instead. */
-final class CaptureQueue implements OrderedRenderCommandQueue {
+final class CaptureQueue implements SubmitNodeCollector {
    private static final int MAP_SIZE = 128;
    private final MeshBuilder mesh;
-   private final MinecraftClient client;
+   private final Minecraft client;
    private final List<String> warnings;
-   private final Map<Identifier, Map<Identifier, Sprite>> atlasCache = new HashMap<>();
+   private final Map<Identifier, Map<Identifier, TextureAtlasSprite>> atlasCache = new HashMap<>();
    int capturedQuads;
    Integer itemFrameMapId;
 
-   CaptureQueue(MeshBuilder mesh, MinecraftClient client, List<String> warnings) {
+   CaptureQueue(MeshBuilder mesh, Minecraft client, List<String> warnings) {
       this.mesh = mesh;
       this.client = client;
       this.warnings = warnings;
    }
 
    @Override
-   public RenderCommandQueue getBatchingQueue(int order) {
+   public OrderedSubmitNodeCollector order(int order) {
       return this;
    }
 
    /** A consumer that turns the layer's vertices into quads, or null for overlay layers that are not geometry. */
-   private CaptureQueue.CapturingConsumer capturingConsumer(RenderLayer layer, Sprite sprite, int tint) {
-      String name = ((RenderLayerAccessor)layer).meshify$getName().toLowerCase(Locale.ROOT);
+   private CaptureQueue.CapturingConsumer capturingConsumer(RenderType layer, TextureAtlasSprite sprite, int tint) {
+      String name = ((RenderTypeNameAccessor)layer).meshify$getName().toLowerCase(Locale.ROOT);
       if (name.contains("glint") || name.contains("outline") || name.contains("crumbling") || name.contains("shadow")) {
          return null;
       }
@@ -107,14 +127,17 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          }
       }
 
-      return new CaptureQueue.CapturingConsumer(this, resolver, layer.getDrawMode() == DrawMode.TRIANGLES);
+      //? if >=26.2 {
+      /*return new CaptureQueue.CapturingConsumer(this, resolver, layer.primitiveTopology() == PrimitiveTopology.TRIANGLES);
+      *///?} else
+      return new CaptureQueue.CapturingConsumer(this, resolver, layer.mode() == Mode.TRIANGLES);
    }
 
    /** Finds the sprite an atlas quad samples by the centre of its UVs, and restates the UVs within that sprite. */
    private TextureKey resolveAtlas(Identifier atlasId, float[][] uv, int tint) {
-      Map<Identifier, Sprite> sprites = this.atlasCache.computeIfAbsent(atlasId, id -> {
-         if (this.client.getTextureManager().getTexture(id) instanceof SpriteAtlasTexture atlas) {
-            Map<Identifier, Sprite> all = ((SpriteAtlasTextureAccessor)atlas).meshify$getSprites();
+      Map<Identifier, TextureAtlasSprite> sprites = this.atlasCache.computeIfAbsent(atlasId, id -> {
+         if (this.client.getTextureManager().getTexture(id) instanceof TextureAtlas atlas) {
+            Map<Identifier, TextureAtlasSprite> all = ((TextureAtlasAccessor)atlas).meshify$getSprites();
             return all != null ? all : Map.of();
          }
 
@@ -128,8 +151,8 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       float centreU = (uv[0][0] + uv[1][0] + uv[2][0] + uv[3][0]) / 4.0F;
       float centreV = (uv[0][1] + uv[1][1] + uv[2][1] + uv[3][1]) / 4.0F;
 
-      for (Sprite sprite : sprites.values()) {
-         if (centreU >= sprite.getMinU() && centreU <= sprite.getMaxU() && centreV >= sprite.getMinV() && centreV <= sprite.getMaxV()) {
+      for (TextureAtlasSprite sprite : sprites.values()) {
+         if (centreU >= sprite.getU0() && centreU <= sprite.getU1() && centreV >= sprite.getV0() && centreV <= sprite.getV1()) {
             for (int k = 0; k < uv.length; k++) {
                uv[k] = TextureKey.spriteUv(sprite, uv[k][0], uv[k][1]);
             }
@@ -163,12 +186,12 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          mapId = this.itemFrameMapId;
       }
 
-      if (mapId < 0 || this.client.world == null) {
+      if (mapId < 0 || this.client.level == null) {
          this.warnOnce("map texture without resolvable map id skipped: " + textureId);
          return null;
       }
 
-      MapState state = this.client.world.getMapState(new MapIdComponent(mapId));
+      MapItemSavedData state = this.client.level.getMapData(new MapId(mapId));
       if (state == null) {
          this.warnOnce("map state not available: map id " + mapId);
          return null;
@@ -179,7 +202,7 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          NativeImage image = new NativeImage(MAP_SIZE, MAP_SIZE, false);
 
          for (int i = 0; i < MAP_SIZE * MAP_SIZE; i++) {
-            image.setColorArgb(i % MAP_SIZE, i / MAP_SIZE, MapColor.getRenderColor(colors[i] & 0xFF));
+            image.setPixel(i % MAP_SIZE, i / MAP_SIZE, MapColor.getColorFromPackedId(colors[i] & 0xFF));
          }
 
          return image;
@@ -217,16 +240,22 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       }
    }
 
-   private static Identifier textureOf(RenderLayer layer) {
+   private static Identifier textureOf(RenderType layer) {
       try {
-         RenderSetup setup = ((RenderLayerAccessor)layer).meshify$getRenderSetup();
-         Map<?, ?> textures = ((RenderSetupAccessor)(Object)setup).meshify$getTextures();
+         //? if >=1.21.11 {
+         RenderSetup setup = ((RenderTypeStateAccessor)layer).meshify$getState();
 
-         for (Object texture : textures.values()) {
-            if (texture instanceof TextureSpecAccessor spec && spec.meshify$getLocation() != null) {
-               return spec.meshify$getLocation();
+         for (Object texture : ((RenderSetupAccessor)(Object)setup).meshify$getTextures().values()) {
+            if (texture instanceof TextureBindingAccessor binding && binding.meshify$getLocation() != null) {
+               return binding.meshify$getLocation();
             }
          }
+         //?} else {
+         /*if (layer instanceof RenderType.CompositeRenderType composite) {
+            RenderType.CompositeState state = ((RenderTypeStateAccessor)(Object)composite).meshify$getState();
+            return ((TextureBindingAccessor)((RenderSetupAccessor)(Object)state).meshify$getTextureState()).meshify$getLocation().orElse(null);
+         }
+         *///?}
       } catch (Exception ignored) {
          // A layer built some other way; the caller warns and skips it.
       }
@@ -239,18 +268,20 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       this.capturedQuads++;
    }
 
+   // From 26.2 the model part submits default to submitModel, which captures them.
+   //? if <26.2 {
    @Override
    public void submitModelPart(
       ModelPart part,
-      MatrixStack matrices,
-      RenderLayer renderLayer,
+      PoseStack matrices,
+      RenderType renderLayer,
       int light,
       int overlay,
-      Sprite sprite,
+      TextureAtlasSprite sprite,
       boolean sheeted,
       boolean hasGlint,
       int tintedColor,
-      CrumblingOverlayCommand crumblingOverlay,
+      CrumblingOverlay crumblingOverlay,
       int outlineColor
    ) {
       CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, sprite, tintedColor);
@@ -259,44 +290,73 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          consumer.finish();
       }
    }
+   //?}
 
    @Override
    public <S> void submitModel(
       Model<? super S> model,
       S state,
-      MatrixStack matrices,
-      RenderLayer renderLayer,
+      PoseStack matrices,
+      RenderType renderLayer,
       int light,
       int overlay,
       int tintedColor,
-      Sprite sprite,
+      //? if >=26.3 {
+      /*UvMapping uvMapping,
+      int outlineColor
+      *///?} else {
+      TextureAtlasSprite sprite,
       int outlineColor,
-      CrumblingOverlayCommand crumblingOverlay
+      CrumblingOverlay crumblingOverlay
+      //?}
    ) {
+      //? if >=26.3 {
+      /*// Armor trims map through a generated paletted texture that is not a resource, so they are left out.
+      if (uvMapping != null && !(uvMapping instanceof TextureAtlasSprite)) {
+         this.warnOnce("paletted texture (armor trim) skipped");
+         return;
+      }
+
+      TextureAtlasSprite sprite = (TextureAtlasSprite)uvMapping;
+      *///?}
       CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, sprite, tintedColor);
       if (consumer != null) {
-         model.setAngles(state);
-         model.render(matrices, consumer, light, overlay);
+         model.setupAnim(state);
+         model.renderToBuffer(matrices, consumer, light, overlay, -1);
          consumer.finish();
       }
    }
 
+   //? if >=26.1 {
+   /*@Override
+   public void submitBlockModel(
+      PoseStack matrices, RenderType renderLayer, List<BlockStateModelPart> parts, int[] tintLayers, int light, int overlay, int outlineColor
+   ) {
+      for (BlockStateModelPart part : parts) {
+         for (Direction face : RegionExporter.QUAD_FACES) {
+            for (BakedQuad quad : part.getQuads(face)) {
+               this.emitBakedQuad(matrices, quad, layerTint(tintLayers, quad));
+            }
+         }
+      }
+   }
+   *///?} else {
    @Override
-   public void submitBlockStateModel(
-      MatrixStack matrices, RenderLayer renderLayer, BlockStateModel model, float r, float g, float b, int light, int overlay, int outlineColor
+   public void submitBlockModel(
+      PoseStack matrices, RenderType renderLayer, BlockStateModel model, float r, float g, float b, int light, int overlay, int outlineColor
    ) {
       int rgb = (int)(r * 255.0F) << 16 | (int)(g * 255.0F) << 8 | (int)(b * 255.0F);
       this.emitBakedModel(matrices, model, rgb);
    }
 
    @Override
-   public void submitBlock(MatrixStack matrices, BlockState state, int light, int overlay, int outlineColor) {
-      this.emitBakedModel(matrices, this.client.getBlockRenderManager().getModels().getModel(state), -1);
+   public void submitBlock(PoseStack matrices, BlockState state, int light, int overlay, int outlineColor) {
+      this.emitBakedModel(matrices, this.client.getBlockRenderer().getBlockModelShaper().getBlockModel(state), -1);
    }
 
-   private void emitBakedModel(MatrixStack matrices, BlockStateModel model, int tint) {
+   private void emitBakedModel(PoseStack matrices, BlockStateModel model, int tint) {
       // A fixed seed, so a model with random variants comes out the same every export.
-      for (BlockModelPart part : model.getParts(Random.create(42L))) {
+      for (BlockModelPart part : model.collectParts(RandomSource.create(42L))) {
          for (Direction face : RegionExporter.QUAD_FACES) {
             for (BakedQuad quad : part.getQuads(face)) {
                this.emitBakedQuad(matrices, quad, tint);
@@ -304,72 +364,105 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
          }
       }
    }
+   //?}
+
+   // The block breaking overlay is not geometry.
+   //? if >=26.3 {
+   /*@Override
+   public void submitBreakingBlockModel(PoseStack matrices, List<BlockStateModelPart> parts, int progress, boolean isBlockTranslucent) {
+   }
+   *///?} elif >=26.2 {
+   /*@Override
+   public void submitBreakingBlockModel(PoseStack matrices, List<BlockStateModelPart> parts, int progress) {
+   }
+   *///?} elif >=26.1 {
+   /*@Override
+   public void submitBreakingBlockModel(PoseStack matrices, BlockStateModel model, long seed, int progress) {
+   }
+   *///?}
 
    @Override
    public void submitItem(
-      MatrixStack matrices,
+      PoseStack matrices,
       ItemDisplayContext displayContext,
       int light,
       int overlay,
       int outlineColors,
       int[] tintLayers,
+      //? if >=26.3 {
+      /*ItemQuads quads,
+      *///?} else
       List<BakedQuad> quads,
-      RenderLayer renderLayer,
-      Glint glintType
+      //? if <26.1
+      RenderType renderLayer,
+      FoilType glintType
    ) {
+      //? if >=26.3 {
+      /*for (BakedQuad quad : quads.all()) {
+      *///?} else
       for (BakedQuad quad : quads) {
-         int layer = quad.tintIndex();
-         this.emitBakedQuad(matrices, quad, layer >= 0 && tintLayers != null && layer < tintLayers.length ? tintLayers[layer] : -1);
+         this.emitBakedQuad(matrices, quad, layerTint(tintLayers, quad));
       }
    }
 
-   private void emitBakedQuad(MatrixStack matrices, BakedQuad quad, int tint) {
-      Sprite sprite = quad.sprite();
+   /** The colour the renderer gave the quad's tint layer, or -1 when the quad is not tinted. */
+   private static int layerTint(int[] tintLayers, BakedQuad quad) {
+      int layer = BakedQuads.tintIndex(quad);
+      return layer >= 0 && tintLayers != null && layer < tintLayers.length ? tintLayers[layer] : -1;
+   }
+
+   private void emitBakedQuad(PoseStack matrices, BakedQuad quad, int tint) {
+      TextureAtlasSprite sprite = BakedQuads.sprite(quad);
       if (sprite == null) {
          return;
       }
 
-      Matrix4f matrix = matrices.peek().getPositionMatrix();
+      Matrix4f matrix = matrices.last().pose();
       float[][] positions = new float[4][3];
       float[][] uv = new float[4][];
       Vector4f vertex = new Vector4f();
 
       for (int k = 0; k < 4; k++) {
-         Vector3fc local = quad.getPosition(k);
+         Vector3fc local = BakedQuads.position(quad, k);
          vertex.set(local.x(), local.y(), local.z(), 1.0F);
          matrix.transform(vertex);
          positions[k][0] = vertex.x();
          positions[k][1] = vertex.y();
          positions[k][2] = vertex.z();
-         long texcoords = quad.getTexcoords(k);
-         uv[k] = TextureKey.spriteUv(sprite, Vector2f.getX(texcoords), Vector2f.getY(texcoords));
+         uv[k] = BakedQuads.spriteUv(quad, sprite, k);
       }
 
-      Vector3f normal = matrices.peek().transformNormal(quad.face().getFloatVector(), new Vector3f());
+      Vector3f normal = matrices.last().transformNormal(quad.direction().getUnitVec3f(), new Vector3f());
       this.capture(TextureKey.sprite(sprite, tint), positions, uv, new float[]{normal.x(), normal.y(), normal.z()});
    }
 
    @Override
-   public void submitCustom(MatrixStack matrices, RenderLayer renderLayer, Custom customRenderer) {
+   public void submitCustomGeometry(PoseStack matrices, RenderType renderLayer, CustomGeometryRenderer customRenderer) {
       CaptureQueue.CapturingConsumer consumer = this.capturingConsumer(renderLayer, null, -1);
       if (consumer != null) {
-         customRenderer.render(matrices.peek(), consumer);
+         customRenderer.render(matrices.last(), consumer);
          consumer.finish();
       }
    }
 
-   @Override
-   public void submitCustom(LayeredCustom customRenderer) {
+   //? if >=26.2 {
+   /*@Override
+   public void submitQuadParticleGroup(QuadParticleRenderState particles) {
    }
+   *///?} else {
+   @Override
+   public void submitParticleGroup(ParticleGroupRenderer customRenderer) {
+   }
+   //?}
 
    @Override
    public void submitText(
-      MatrixStack matrices,
+      PoseStack matrices,
       float x,
       float y,
-      OrderedText text,
+      FormattedCharSequence text,
       boolean dropShadow,
-      TextLayerType layerType,
+      DisplayMode layerType,
       int light,
       int color,
       int backgroundColor,
@@ -379,33 +472,66 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
    }
 
    @Override
-   public void submitLabel(
-      MatrixStack matrices,
-      Vec3d nameLabelPos,
+   public void submitNameTag(
+      PoseStack matrices,
+      Vec3 nameLabelPos,
       int y,
-      Text label,
+      Component label,
       boolean notSneaking,
       int light,
+      //? if <26.2
       double squaredDistanceToCamera,
       CameraRenderState cameraState
    ) {
    }
 
+   //? if <1.21.11 {
+   /*@Override
+   public void submitHitbox(PoseStack matrices, EntityRenderState renderState, HitboxesRenderState hitboxes) {
+   }
+   *///?}
+
    @Override
-   public void submitShadowPieces(MatrixStack matrices, float shadowRadius, List<ShadowPiece> shadowPieces) {
+   public void submitShadow(PoseStack matrices, float shadowRadius, List<ShadowPiece> shadowPieces) {
    }
 
    @Override
-   public void submitFire(MatrixStack matrices, EntityRenderState renderState, Quaternionf rotation) {
+   public void submitFlame(PoseStack matrices, EntityRenderState renderState, Quaternionf rotation) {
    }
 
    @Override
-   public void submitLeash(MatrixStack matrices, LeashData leashData) {
+   public void submitLeash(PoseStack matrices, LeashState leashData) {
+   }
+
+   //? if >=26.2 {
+   /*@Override
+   public void submitMovingBlock(PoseStack matrices, MovingBlockRenderState state, int outlineColor) {
    }
 
    @Override
-   public void submitMovingBlock(MatrixStack matrices, MovingBlockRenderState state) {
+   public void submitShapeOutline(PoseStack matrices, VoxelShape shape, RenderType renderLayer, int color, float width, boolean afterTerrain) {
    }
+
+   @Override
+   public void submitGizmoPrimitives(DrawableGizmoPrimitives.Group group, CameraRenderState camera, boolean onTop) {
+   }
+   *///?} else {
+   @Override
+   public void submitMovingBlock(PoseStack matrices, MovingBlockRenderState state) {
+   }
+   //?}
+
+   //? if >=26.3 {
+   /*@Override
+   public <S> void submitCrumblingOverlay(
+      Model<? super S> model, S state, PoseStack matrices, RenderType renderLayer, int light, int overlay, int tintedColor, CrumblingOverlay crumblingOverlay
+   ) {
+   }
+
+   @Override
+   public void submitTextBackground(PoseStack matrices, float x0, float y0, float x1, float y1, int color, DisplayMode displayMode, int light) {
+   }
+   *///?}
 
    private static final class CapturingConsumer implements VertexConsumer {
       /** Per vertex: x, y, z, u, v, the normal's x, y, z, then 1 once a normal was given. */
@@ -427,7 +553,7 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       }
 
       @Override
-      public VertexConsumer vertex(float x, float y, float z) {
+      public VertexConsumer addVertex(float x, float y, float z) {
          this.flushVertex();
          this.currentVertex = new float[VERTEX_SIZE];
          this.currentVertex[0] = x;
@@ -444,7 +570,7 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       }
 
       @Override
-      public VertexConsumer texture(float u, float v) {
+      public VertexConsumer setUv(float u, float v) {
          if (this.currentVertex != null) {
             this.currentVertex[U] = u;
             this.currentVertex[V] = v;
@@ -454,7 +580,7 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       }
 
       @Override
-      public VertexConsumer normal(float x, float y, float z) {
+      public VertexConsumer setNormal(float x, float y, float z) {
          if (this.currentVertex != null) {
             this.currentVertex[NORMAL] = x;
             this.currentVertex[NORMAL + 1] = y;
@@ -466,27 +592,34 @@ final class CaptureQueue implements OrderedRenderCommandQueue {
       }
 
       @Override
-      public VertexConsumer color(int red, int green, int blue, int alpha) {
+      public VertexConsumer setColor(int red, int green, int blue, int alpha) {
          return this;
       }
 
       @Override
-      public VertexConsumer color(int argb) {
+      public VertexConsumer setColor(int argb) {
          return this;
       }
 
       @Override
-      public VertexConsumer overlay(int u, int v) {
+      public VertexConsumer setUv1(int u, int v) {
          return this;
       }
 
       @Override
-      public VertexConsumer light(int u, int v) {
+      public VertexConsumer setUv2(int u, int v) {
          return this;
       }
 
+      //? if >=1.21.11
       @Override
-      public VertexConsumer lineWidth(float width) {
+      public VertexConsumer setLineWidth(float width) {
+         return this;
+      }
+
+      //? if >=26.3
+      //@Override
+      public VertexConsumer setUv3(float u, float v) {
          return this;
       }
 

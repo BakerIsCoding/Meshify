@@ -22,9 +22,9 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 
 public class MeshifyClient implements ClientModInitializer {
    private static final List<OptionSuggestion> OPTION_SUGGESTIONS = optionSuggestions();
@@ -116,9 +116,9 @@ public class MeshifyClient implements ClientModInitializer {
       return ctx -> commandResult(action.test(Feedback.of(ctx.getSource())));
    }
 
-   private static int openMenu(MinecraftClient client) {
+   private static int openMenu(Minecraft client) {
       // Deferred: the chat screen closes right after the command and would take the menu with it.
-      client.send(() -> client.setScreen(new MeshifyScreen()));
+      client.schedule(() -> client.setScreen(new MeshifyScreen()));
       return 1;
    }
 
@@ -129,7 +129,7 @@ public class MeshifyClient implements ClientModInitializer {
    /** {@code <literal>} sets the corner where the player stands, {@code <literal> x y z} sets it there. */
    private static LiteralArgumentBuilder<FabricClientCommandSource> cornerCommand(String literal, Corner corner) {
       return ClientCommandManager.literal(literal)
-         .executes(ctx -> setCorner(ctx.getSource(), corner, ctx.getSource().getPlayer().getBlockPos()))
+         .executes(ctx -> setCorner(ctx.getSource(), corner, ctx.getSource().getPlayer().blockPosition()))
          .then(
             ClientCommandManager.argument("x", IntegerArgumentType.integer())
                .then(
@@ -190,15 +190,15 @@ public class MeshifyClient implements ClientModInitializer {
    private static int setCorner(FabricClientCommandSource source, Corner corner, BlockPos pos) {
       MeshifyActions.setCorner(Feedback.of(source), corner, pos);
       if (Selection.isComplete()) {
-         source.sendFeedback(Text.translatable("meshify.msg.hint"));
+         source.sendFeedback(Component.translatable("meshify.msg.hint"));
       }
 
       return 1;
    }
 
    private record OptionSuggestion(String token, String descriptionKey, Object descriptionArgument) {
-      Text description() {
-         return this.descriptionArgument == null ? Text.translatable(this.descriptionKey) : Text.translatable(this.descriptionKey, this.descriptionArgument);
+      Component description() {
+         return this.descriptionArgument == null ? Component.translatable(this.descriptionKey) : Component.translatable(this.descriptionKey, this.descriptionArgument);
       }
    }
 }

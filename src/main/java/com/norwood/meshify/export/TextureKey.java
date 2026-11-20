@@ -1,5 +1,6 @@
 package com.norwood.meshify.export;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import com.norwood.meshify.mixin.SpriteContentsAccessor;
 import java.io.IOException;
 import java.io.InputStream;
@@ -7,12 +8,11 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.Sprite;
-import net.minecraft.client.texture.SpriteContents;
-import net.minecraft.resource.Resource;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.texture.SpriteContents;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.Resource;
 
 public abstract class TextureKey {
    private final String id;
@@ -35,7 +35,7 @@ public abstract class TextureKey {
       return this.preScaled;
    }
 
-   public abstract NativeImage load(MinecraftClient client) throws IOException;
+   public abstract NativeImage load(Minecraft client) throws IOException;
 
    public static String sanitize(String name) {
       return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "_").replaceAll("^_+|_+$", "");
@@ -47,20 +47,20 @@ public abstract class TextureKey {
       return rgb == 0xFFFFFF ? -1 : rgb;
    }
 
-   public static TextureKey sprite(Sprite sprite, int tint) {
+   public static TextureKey sprite(TextureAtlasSprite sprite, int tint) {
       int rgb = normalizeTint(tint);
-      Identifier id = sprite.getContents().getId();
+      Identifier id = sprite.contents().name();
       String name = id.getNamespace().equals("minecraft") ? id.getPath() : id.getNamespace() + "_" + id.getPath();
       return new TextureKey.SpriteKey(sanitize(name) + tintSuffix(rgb), sprite, rgb);
    }
 
    /** An atlas UV restated within {@code sprite}'s own 0..1 square. */
-   public static float[] spriteUv(Sprite sprite, float u, float v) {
-      float spanU = sprite.getMaxU() - sprite.getMinU();
-      float spanV = sprite.getMaxV() - sprite.getMinV();
+   public static float[] spriteUv(TextureAtlasSprite sprite, float u, float v) {
+      float spanU = sprite.getU1() - sprite.getU0();
+      float spanV = sprite.getV1() - sprite.getV0();
       return new float[]{
-         spanU > 0.0F ? Math.clamp((u - sprite.getMinU()) / spanU, 0.0F, 1.0F) : 0.0F,
-         spanV > 0.0F ? Math.clamp((v - sprite.getMinV()) / spanV, 0.0F, 1.0F) : 0.0F
+         spanU > 0.0F ? Math.clamp((u - sprite.getU0()) / spanU, 0.0F, 1.0F) : 0.0F,
+         spanV > 0.0F ? Math.clamp((v - sprite.getV0()) / spanV, 0.0F, 1.0F) : 0.0F
       };
    }
 
@@ -99,7 +99,7 @@ public abstract class TextureKey {
    public static TextureKey generated(String id, TextureKey.ImageSupplier supplier, boolean preScaled) {
       return new TextureKey(id, preScaled) {
          @Override
-         public NativeImage load(MinecraftClient client) throws IOException {
+         public NativeImage load(Minecraft client) throws IOException {
             return supplier.produce(client);
          }
       };
@@ -110,10 +110,10 @@ public abstract class TextureKey {
    }
 
    /** Reads a PNG from the loaded resource packs. */
-   static NativeImage readResource(MinecraftClient client, Identifier pngPath) throws IOException {
+   static NativeImage readResource(Minecraft client, Identifier pngPath) throws IOException {
       Resource resource = client.getResourceManager().getResource(pngPath).orElseThrow(() -> new IOException("resource not found: " + pngPath));
 
-      try (InputStream in = resource.getInputStream()) {
+      try (InputStream in = resource.open()) {
          return NativeImage.read(in);
       }
    }
@@ -124,11 +124,11 @@ public abstract class TextureKey {
 
       for (int row = 0; row < h; row++) {
          for (int col = 0; col < w; col++) {
-            int argb = src.getColorArgb(x + col, y + row);
+            int argb = src.getPixel(x + col, y + row);
             int red = (int)((argb >> 16 & 0xFF) * factor[0]);
             int green = (int)((argb >> 8 & 0xFF) * factor[1]);
             int blue = (int)((argb & 0xFF) * factor[2]);
-            copy.setColorArgb(col, row, argb & 0xFF000000 | red << 16 | green << 8 | blue);
+            copy.setPixel(col, row, argb & 0xFF000000 | red << 16 | green << 8 | blue);
          }
       }
 
@@ -151,7 +151,7 @@ public abstract class TextureKey {
       }
 
       @Override
-      public NativeImage load(MinecraftClient client) throws IOException {
+      public NativeImage load(Minecraft client) throws IOException {
          NativeImage result = null;
 
          for (TextureKey.CompositeLayer layer : this.layers) {
@@ -183,19 +183,19 @@ public abstract class TextureKey {
 
          for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-               int top = src.getColorArgb(x, y);
+               int top = src.getPixel(x, y);
                int topAlpha = top >>> 24;
                if (topAlpha == 0) {
                   continue;
                }
 
                float a = topAlpha / 255.0F;
-               int bottom = dst.getColorArgb(x, y);
+               int bottom = dst.getPixel(x, y);
                int red = (int)((top >> 16 & 0xFF) * factor[0] * a + (bottom >> 16 & 0xFF) * (1.0F - a));
                int green = (int)((top >> 8 & 0xFF) * factor[1] * a + (bottom >> 8 & 0xFF) * (1.0F - a));
                int blue = (int)((top & 0xFF) * factor[2] * a + (bottom & 0xFF) * (1.0F - a));
                int alpha = Math.min(255, (int)(topAlpha + (bottom >>> 24) * (1.0F - a)));
-               dst.setColorArgb(x, y, alpha << 24 | red << 16 | green << 8 | blue);
+               dst.setPixel(x, y, alpha << 24 | red << 16 | green << 8 | blue);
             }
          }
       }
@@ -206,7 +206,7 @@ public abstract class TextureKey {
 
    @FunctionalInterface
    public interface ImageSupplier {
-      NativeImage produce(MinecraftClient client) throws IOException;
+      NativeImage produce(Minecraft client) throws IOException;
    }
 
    private static final class ResourceKey extends TextureKey {
@@ -218,7 +218,7 @@ public abstract class TextureKey {
       }
 
       @Override
-      public NativeImage load(MinecraftClient client) throws IOException {
+      public NativeImage load(Minecraft client) throws IOException {
          return readResource(client, this.path);
       }
    }
@@ -227,7 +227,7 @@ public abstract class TextureKey {
       private static final int TIMEOUT_MS = 4000;
       private static final int SKIN_SIZE = 64;
       private static final int LEGACY_SKIN_HEIGHT = 32;
-      private static final Identifier STEVE_SKIN = Identifier.ofVanilla("textures/entity/player/wide/steve.png");
+      private static final Identifier STEVE_SKIN = Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png");
       private final String url;
 
       SkinKey(String id, String url) {
@@ -236,7 +236,7 @@ public abstract class TextureKey {
       }
 
       @Override
-      public NativeImage load(MinecraftClient client) throws IOException {
+      public NativeImage load(Minecraft client) throws IOException {
          try {
             return this.download();
          } catch (Exception exception) {
@@ -275,7 +275,7 @@ public abstract class TextureKey {
 
          for (int y = 0; y < SKIN_SIZE; y++) {
             for (int x = 0; x < SKIN_SIZE; x++) {
-               expanded.setColorArgb(x, y, y < LEGACY_SKIN_HEIGHT ? src.getColorArgb(x, y) : 0);
+               expanded.setPixel(x, y, y < LEGACY_SKIN_HEIGHT ? src.getPixel(x, y) : 0);
             }
          }
 
@@ -284,22 +284,22 @@ public abstract class TextureKey {
    }
 
    private static final class SpriteKey extends TextureKey {
-      private final Sprite sprite;
+      private final TextureAtlasSprite sprite;
       private final int tint;
 
-      SpriteKey(String id, Sprite sprite, int tint) {
+      SpriteKey(String id, TextureAtlasSprite sprite, int tint) {
          super(id);
          this.sprite = sprite;
          this.tint = tint;
       }
 
       @Override
-      public NativeImage load(MinecraftClient client) {
-         SpriteContents contents = this.sprite.getContents();
+      public NativeImage load(Minecraft client) {
+         SpriteContents contents = this.sprite.contents();
          NativeImage image = ((SpriteContentsAccessor)contents).meshify$getImage();
          // Animated sprites stack their frames below the first; only the first is copied.
-         int w = Math.min(contents.getWidth(), image.getWidth());
-         int h = Math.min(contents.getHeight(), image.getHeight());
+         int w = Math.min(contents.width(), image.getWidth());
+         int h = Math.min(contents.height(), image.getHeight());
          return copyRegion(image, 0, 0, w, h, this.tint);
       }
    }

@@ -4,9 +4,9 @@
 
 Export any region of a Minecraft world to OBJ and glTF, textures included.
 
-![Minecraft 1.21.11](https://img.shields.io/badge/Minecraft-1.21.11-62B47A)
+![Minecraft 1.21.10 to 26.3](https://img.shields.io/badge/Minecraft-1.21.10%20to%2026.3-62B47A)
 ![Fabric](https://img.shields.io/badge/loader-Fabric-DBD0B4)
-![Java 21](https://img.shields.io/badge/Java-21-E76F00)
+![Java 21 or 25](https://img.shields.io/badge/Java-21%20or%2025-E76F00)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 Meshify is a client-side Fabric mod. You mark two corners in the world and it writes the blocks between them as a textured 3D model that opens in Blender or in any web glTF viewer. Nothing needs to be installed on the server, because it reads the world your client already has loaded.
@@ -35,8 +35,8 @@ Meshify is based on [pos2obj](https://www.curseforge.com/minecraft/mc-mods/pos2o
 
 ## Quick start
 
-1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 1.21.11 and [Fabric API](https://modrinth.com/mod/fabric-api).
-2. Build the jar (see [Development](#development)) and copy `build/libs/meshify-1.1.3.jar` into your `mods` folder.
+1. Install [Fabric Loader](https://fabricmc.net/use/) and [Fabric API](https://modrinth.com/mod/fabric-api) for your Minecraft version.
+2. Build the jars (see [Development](#development)) and copy the one for your version, such as `versions/1.21.11/build/libs/meshify-1.1.3+1.21.11.jar`, into your `mods` folder.
 3. In game, look at one corner of your build and press <kbd>V</kbd>. Look at the opposite corner and press <kbd>B</kbd>.
 4. Run the export:
 
@@ -50,10 +50,12 @@ The files land in `meshify/castle/` inside the game directory (`.minecraft` for 
 
 | Requirement | Version |
 | --- | --- |
-| Minecraft | 1.21.11 |
+| Minecraft | 1.21.10, 1.21.11, 26.1 to 26.1.2, 26.2, 26.3 |
 | Fabric Loader | 0.17.0 or newer |
-| Fabric API | any build for 1.21.11 |
-| Java | 21 |
+| Fabric API | 0.137.0 or newer on 1.21.10, any build on the rest |
+| Java | 21 on 1.21.x, 25 on 26.x |
+
+Each Minecraft version has its own jar, named after it. The 26.1 jar also runs on 26.1.1 and 26.1.2.
 
 Meshify only runs on the client. There is no prebuilt release yet, so build the jar from source as described in [Development](#development) and drop it into `mods` next to Fabric API.
 
@@ -150,17 +152,21 @@ cd Meshify
 ./gradlew build
 ```
 
-The mod jar is written to `build/libs/meshify-1.1.3.jar`. On Windows, use `gradlew.bat` instead of `./gradlew`.
+This builds a jar for every supported version into `versions/<version>/build/libs/`, for example `meshify-1.1.3+1.21.11.jar`. On Windows, use `gradlew.bat` instead of `./gradlew`. Gradle runs on Java 25 and downloads it if it is not installed.
+
+All versions share the code in `src/` through [Stonecutter](https://stonecutter.kikugie.dev/). Code that only applies to some versions sits between comments like `//? if >=26.1 {` and `//?}`, and classes that were renamed between versions are swapped by the replacements in `build.gradle`. Each version's Minecraft and Fabric API versions are set in `versions/<version>/gradle.properties`.
+
+`src/` is written for 1.21.11. To work against another version, run `./gradlew "Set active project to 26.3"` (or the matching task in the IDE's Gradle panel), and run `./gradlew "Reset active project"` before you commit.
 
 | Task | What it does |
 | --- | --- |
-| `./gradlew runClient` | Starts a development client with the mod loaded. |
+| `./gradlew :1.21.11:runClient` | Starts a development client for that version with the mod loaded. |
 | `./gradlew glbCheck` | Checks the `.glb` writer output. |
 | `./gradlew boxUvCheck` | Checks the cuboid texture unwrap, upright and flipped. |
 | `./gradlew selectionCheck` | Checks resizing the selection and its volume. |
 | `./gradlew optionsCheck` | Checks that menu choices survive the round trip through the option string. |
 
-The checks are plain `main` methods, so the project has no test dependency. Please run them before opening a pull request.
+The checks are plain `main` methods, so the project has no test dependency. Without a version prefix they run once per version. Please run them before opening a pull request.
 
 ## Credits
 

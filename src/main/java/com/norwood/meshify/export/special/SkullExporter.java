@@ -12,41 +12,41 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
-import net.minecraft.block.AbstractSkullBlock;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.SkullBlock;
-import net.minecraft.block.SkullBlock.SkullType;
-import net.minecraft.block.SkullBlock.Type;
-import net.minecraft.block.entity.SkullBlockEntity;
-import net.minecraft.component.type.ProfileComponent;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.BlockRenderView;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.component.ResolvableProfile;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.AbstractSkullBlock;
+import net.minecraft.world.level.block.SkullBlock;
+import net.minecraft.world.level.block.SkullBlock.Type;
+import net.minecraft.world.level.block.SkullBlock.Types;
+import net.minecraft.world.level.block.entity.SkullBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public final class SkullExporter {
    private SkullExporter() {
    }
 
    public static boolean export(
-      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractSkullBlock block, double blockX, double blockY, double blockZ, List<String> warnings
+      MeshBuilder mesh, BlockGetter world, BlockPos pos, BlockState state, AbstractSkullBlock block, double blockX, double blockY, double blockZ, List<String> warnings
    ) {
-      SkullType type = block.getSkullType();
+      Type type = block.getType();
       Head head = headFor(type);
       // Checked before the state is read: a modded head may have neither ROTATION nor HORIZONTAL_FACING.
-      if (head == null && type != Type.DRAGON) {
+      if (head == null && type != Types.DRAGON) {
          warnings.add("unsupported head type skipped: " + type + " @ " + pos.toShortString());
          return false;
       }
 
-      boolean wall = !state.contains(SkullBlock.ROTATION);
-      double yaw = wall ? Yaw.of(state.get(Properties.HORIZONTAL_FACING)) : Yaw.ofRotation(state);
-      if (type == Type.DRAGON) {
+      boolean wall = !state.hasProperty(SkullBlock.ROTATION);
+      double yaw = wall ? Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING)) : Yaw.ofRotation(state);
+      if (type == Types.DRAGON) {
          return exportDragon(mesh, pos, blockX, blockY, blockZ, yaw, wall, warnings);
       }
 
-      Identifier fallback = Identifier.ofVanilla("textures/entity/" + head.texture() + ".png");
-      String skinUrl = type == Type.PLAYER ? resolveSkinUrl(world, pos) : null;
+      Identifier fallback = Identifier.withDefaultNamespace("textures/entity/" + head.texture() + ".png");
+      String skinUrl = type == Types.PLAYER ? resolveSkinUrl(world, pos) : null;
       TextureKey texture = skinUrl != null ? TextureKey.playerSkin(skinUrl) : TextureKey.resource(fallback);
       double x0 = 8.0 - head.halfWidth();
       double x1 = 8.0 + head.halfWidth();
@@ -56,7 +56,7 @@ public final class SkullExporter {
       double z0 = wall ? 8.0 : 4.0;
       double z1 = wall ? 16.0 : 12.0;
       BoxUv.emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, 0, 0, 64, head.textureHeight(), yaw, 0.0);
-      if (type == Type.PLAYER) {
+      if (type == Types.PLAYER) {
          // The hat layer, a quarter pixel proud of the head.
          BoxUv.emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, 32, 0, 64, head.textureHeight(), yaw, 0.25);
       }
@@ -65,8 +65,8 @@ public final class SkullExporter {
    }
 
    /** The head's entity texture, under {@code textures/entity/}; null for heads this cuboid can't draw. */
-   private static Head headFor(SkullType type) {
-      if (!(type instanceof Type vanilla)) {
+   private static Head headFor(Type type) {
+      if (!(type instanceof Types vanilla)) {
          return null;
       }
 
@@ -84,7 +84,7 @@ public final class SkullExporter {
    private static boolean exportDragon(MeshBuilder mesh, BlockPos pos, double blockX, double blockY, double blockZ, double yaw, boolean wall, List<String> warnings) {
       try {
          ObjTemplate template = ObjTemplate.getOrLoad(wall ? "dragon_wall_head.obj" : "dragon_head.obj");
-         TextureKey texture = TextureKey.resource(Identifier.ofVanilla("textures/entity/enderdragon/dragon.png"));
+         TextureKey texture = TextureKey.resource(Identifier.withDefaultNamespace("textures/entity/enderdragon/dragon.png"));
          template.emit(mesh, null, (material, normal) -> texture, blockX, blockY, blockZ, yaw);
          return true;
       } catch (IOException exception) {
@@ -94,14 +94,14 @@ public final class SkullExporter {
    }
 
    /** The owner's skin URL from the head's profile, or null when it has none or it can't be read. */
-   private static String resolveSkinUrl(BlockRenderView world, BlockPos pos) {
+   private static String resolveSkinUrl(BlockGetter world, BlockPos pos) {
       try {
          if (!(world.getBlockEntity(pos) instanceof SkullBlockEntity skull)) {
             return null;
          }
 
-         ProfileComponent owner = skull.getOwner();
-         GameProfile profile = owner == null ? null : owner.getGameProfile();
+         ResolvableProfile owner = skull.getOwnerProfile();
+         GameProfile profile = owner == null ? null : owner.partialProfile();
          if (profile == null) {
             return null;
          }

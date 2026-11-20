@@ -6,17 +6,17 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 
 public final class Selection {
    public static BlockPos start;
    public static BlockPos end;
-   public static RegistryKey<World> dimension;
+   public static ResourceKey<Level> dimension;
    public static String lastOptions = "";
 
    private static Path sessionFile;
@@ -46,7 +46,7 @@ public final class Selection {
       save();
    }
 
-   public static void set(Corner corner, BlockPos pos, RegistryKey<World> worldKey) {
+   public static void set(Corner corner, BlockPos pos, ResourceKey<Level> worldKey) {
       // Corners from different dimensions describe nothing, so the stale one is dropped.
       if (dimension != null && !dimension.equals(worldKey)) {
          start = null;
@@ -63,7 +63,7 @@ public final class Selection {
       save();
    }
 
-   public static boolean matchesDimension(RegistryKey<World> worldKey) {
+   public static boolean matchesDimension(ResourceKey<Level> worldKey) {
       return dimension == null || dimension.equals(worldKey);
    }
 
@@ -77,7 +77,7 @@ public final class Selection {
 
    /** The region's size in blocks along X, Y and Z. */
    private static BlockPos size() {
-      return max().subtract(min()).add(1, 1, 1);
+      return max().subtract(min()).offset(1, 1, 1);
    }
 
    /** The region's size along X, Y and Z, e.g. {@code 32×18×40}. */
@@ -117,11 +117,11 @@ public final class Selection {
       BlockPos lo = min();
       BlockPos hi = max();
       Direction.Axis axis = side.getAxis();
-      int shift = Math.max(blocks, lo.getComponentAlongAxis(axis) - hi.getComponentAlongAxis(axis));
-      if (side.getDirection() == Direction.AxisDirection.POSITIVE) {
-         setBounds(lo, hi.offset(side, shift));
+      int shift = Math.max(blocks, lo.get(axis) - hi.get(axis));
+      if (side.getAxisDirection() == Direction.AxisDirection.POSITIVE) {
+         setBounds(lo, hi.relative(side, shift));
       } else {
-         setBounds(lo.offset(side, shift), hi);
+         setBounds(lo.relative(side, shift), hi);
       }
    }
 
@@ -173,7 +173,7 @@ public final class Selection {
       String dimensionName = properties.getProperty("dimension", "");
       Identifier dimensionId = dimensionName.isEmpty() ? null : Identifier.tryParse(dimensionName);
       if (dimensionId != null) {
-         dimension = RegistryKey.of(RegistryKeys.WORLD, dimensionId);
+         dimension = ResourceKey.create(Registries.DIMENSION, dimensionId);
       }
    }
 
@@ -187,7 +187,7 @@ public final class Selection {
       writePos(properties, "end", end);
       properties.setProperty("options", lastOptions);
       if (dimension != null) {
-         properties.setProperty("dimension", dimension.getValue().toString());
+         properties.setProperty("dimension", dimension.identifier().toString());
       }
 
       try {

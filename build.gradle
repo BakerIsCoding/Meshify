@@ -1,5 +1,40 @@
-plugins {
-	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+// Stonecutter runs this script once per version listed in settings.gradle; sc.current is the one being built.
+def unobfuscated = sc.current.parsed.matches('>=26')
+def javaVersion = unobfuscated ? 25 : 21
+
+// 26.x ships without obfuscation, so it takes the Loom variant that does no remapping.
+apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
+
+version = "${mod_version}+${sc.current.version}"
+
+// Renames Stonecutter swaps through the whole source; the right-hand names are the ones in src/.
+stonecutter {
+	replacements.string(current.parsed.matches('>=1.21.11')) {
+		replace 'ResourceLocation', 'Identifier'
+		replace '.location()', '.identifier()'
+		replace 'net.minecraft.Util;', 'net.minecraft.util.Util;'
+		replace 'net.minecraft.client.renderer.RenderType;', 'net.minecraft.client.renderer.rendertype.RenderType;'
+	}
+	// 26.1 moved these classes, and Fabric API took Mojang's names.
+	replacements.string(current.parsed.matches('>=26.1')) {
+		replace 'net.minecraft.client.renderer.block.model.BakedQuad;', 'net.minecraft.client.resources.model.geometry.BakedQuad;'
+		replace 'net.minecraft.client.renderer.state.CameraRenderState;', 'net.minecraft.client.renderer.state.level.CameraRenderState;'
+		replace 'net.minecraft.client.renderer.block.model.BlockStateModel;', 'net.minecraft.client.renderer.block.dispatch.BlockStateModel;'
+		replace 'context.drawCenteredString(', 'context.centeredText('
+		replace 'context.drawString(', 'context.text('
+		replace 'ClientCommandManager', 'ClientCommands'
+		replace 'keybinding.v1.KeyBindingHelper;', 'keymapping.v1.KeyMappingHelper;'
+		replace 'KeyBindingHelper.registerKeyBinding', 'KeyMappingHelper.registerKeyMapping'
+		replace 'displayClientMessage(text, false)', 'sendSystemMessage(text)'
+		replace 'displayClientMessage(text, true)', 'sendOverlayMessage(text)'
+	}
+	// 26.2 moved the screen, the HUD and the toasts under Minecraft.gui.
+	replacements.string(current.parsed.matches('>=26.2')) {
+		replace 'client.setScreen(', 'client.gui.setScreen('
+		replace 'client.screen ==', 'client.gui.screen() =='
+		replace 'gui.setOverlayMessage(', 'gui.hud.setOverlayMessage('
+		replace 'client.getToastManager()', 'client.gui.toastManager()'
+	}
 }
 
 base {
@@ -7,57 +42,46 @@ base {
 }
 
 dependencies {
-	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	if (!unobfuscated) {
+		mappings loom.officialMojangMappings()
+	}
+	// The unobfuscated Loom has no mod* configurations; plain implementation does the same job there.
+	def modConfiguration = unobfuscated ? 'implementation' : 'modImplementation'
+	add(modConfiguration, "net.fabricmc:fabric-loader:${loader_version}")
+	add(modConfiguration, "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}")
 }
 
 processResources {
-	inputs.property "version", project.version
-	filesMatching("fabric.mod.json") {
-		expand "version": project.version
+	def metadata = [version: version, minecraft: minecraft_range, fabricApi: findProperty('fabric_api_range') ?: '*', java: javaVersion]
+	inputs.properties metadata
+	filesMatching(["fabric.mod.json", "meshify.mixins.json"]) {
+		expand metadata
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	it.options.release = javaVersion
 }
 
 // Self-checks run as JavaExec on the main classpath, so the project needs no test dependency.
-tasks.register('glbCheck', JavaExec) {
-	group = 'verification'
-	description = 'Validates the GLB writer output'
-	classpath = sourceSets.main.runtimeClasspath
-	mainClass = 'com.norwood.meshify.export.GlbWriter'
-}
-
-tasks.register('boxUvCheck', JavaExec) {
-	group = 'verification'
-	description = 'Validates the cuboid texture unwrap, upright and flipped'
-	classpath = sourceSets.main.runtimeClasspath
-	mainClass = 'com.norwood.meshify.export.BoxUv'
-}
-
-tasks.register('selectionCheck', JavaExec) {
-	group = 'verification'
-	description = 'Validates resizing the selection one face at a time'
-	classpath = sourceSets.main.runtimeClasspath
-	mainClass = 'com.norwood.meshify.Selection'
-	// Loading BlockPos starts Minecraft's logger, which drops a logs/ folder in the working directory.
-	workingDir = layout.buildDirectory.get().asFile
-}
-
-tasks.register('optionsCheck', JavaExec) {
-	group = 'verification'
-	description = 'Validates that menu choices survive the trip through the option string'
-	classpath = sourceSets.main.runtimeClasspath
-	mainClass = 'com.norwood.meshify.MeshifyActions'
-	workingDir = layout.buildDirectory.get().asFile
+// Loading BlockPos starts Minecraft's logger, which drops a logs/ folder in the working directory.
+[
+	glbCheck      : ['com.norwood.meshify.export.GlbWriter', 'Validates the GLB writer output'],
+	boxUvCheck    : ['com.norwood.meshify.export.BoxUv', 'Validates the cuboid texture unwrap, upright and flipped'],
+	selectionCheck: ['com.norwood.meshify.Selection', 'Validates resizing the selection one face at a time'],
+	optionsCheck  : ['com.norwood.meshify.MeshifyActions', 'Validates that menu choices survive the trip through the option string'],
+].each { taskName, check ->
+	tasks.register(taskName, JavaExec) {
+		group = 'verification'
+		description = check[1]
+		classpath = sourceSets.main.runtimeClasspath
+		mainClass = check[0]
+		workingDir = layout.buildDirectory.get().asFile
+	}
 }
 
 java {
 	withSourcesJar()
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
+	toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
 }

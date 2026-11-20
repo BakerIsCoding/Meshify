@@ -3,11 +3,11 @@ package com.norwood.meshify.export.special;
 import com.norwood.meshify.export.BoxUv;
 import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
-import net.minecraft.block.BedBlock;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.enums.BedPart;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public final class BedExporter {
    /** Per face, four corners of {x, y, z, u, v} in model and texture pixels. */
@@ -36,9 +36,9 @@ public final class BedExporter {
    }
 
    public static void export(MeshBuilder mesh, BlockState state, BedBlock bed, double blockX, double blockY, double blockZ) {
-      double yaw = Yaw.of(state.get(Properties.HORIZONTAL_FACING));
-      boolean isHead = state.get(BedBlock.PART) == BedPart.HEAD;
-      TextureKey texture = TextureKey.resource(Identifier.ofVanilla("textures/entity/bed/" + bed.getColor().getId() + ".png"));
+      double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
+      boolean isHead = state.getValue(BedBlock.PART) == BedPart.HEAD;
+      TextureKey texture = TextureKey.resource(Identifier.withDefaultNamespace("textures/entity/bed/" + bed.getColor().getName() + ".png"));
       double[][][] quads = isHead ? HEAD_QUADS : FOOT_QUADS;
       float[][] normals = isHead ? HEAD_NORMALS : FOOT_NORMALS;
 

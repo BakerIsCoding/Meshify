@@ -5,17 +5,17 @@ import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.block.AbstractBannerBlock;
-import net.minecraft.block.BannerBlock;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BannerBlockEntity;
-import net.minecraft.component.type.BannerPatternsComponent.Layer;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.DyeColor;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.BlockRenderView;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.AbstractBannerBlock;
+import net.minecraft.world.level.block.BannerBlock;
+import net.minecraft.world.level.block.entity.BannerBlockEntity;
+import net.minecraft.world.level.block.entity.BannerPatternLayers.Layer;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public final class BannerExporter {
    private BannerExporter() {
@@ -23,10 +23,10 @@ public final class BannerExporter {
 
    /** The cuboids are the banner model's, at the 2/3 scale its renderer draws it, so each unwrap is sized apart from its box. */
    public static void export(
-      MeshBuilder mesh, BlockRenderView world, BlockPos pos, BlockState state, AbstractBannerBlock block, double blockX, double blockY, double blockZ
+      MeshBuilder mesh, BlockGetter world, BlockPos pos, BlockState state, AbstractBannerBlock block, double blockX, double blockY, double blockZ
    ) {
       TextureKey texture = buildTexture(world, pos, block.getColor());
-      if (state.contains(BannerBlock.ROTATION)) {
+      if (state.hasProperty(BannerBlock.ROTATION)) {
          double yaw = Yaw.ofRotation(state);
          // Pole, crossbar, flag.
          BoxUv.emit(
@@ -45,7 +45,7 @@ public final class BannerExporter {
             0, 0, 20, 40, 1, 64, 64, yaw, 0.0, Direction.UP, false
          );
       } else {
-         double yaw = Yaw.of(state.get(Properties.HORIZONTAL_FACING));
+         double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
          // Crossbar, flag.
          BoxUv.emit(
             mesh, texture, blockX, blockY, blockZ,
@@ -61,24 +61,27 @@ public final class BannerExporter {
    }
 
    /** The banner base dyed its colour, with each pattern layer painted on top in its own colour. */
-   private static TextureKey buildTexture(BlockRenderView world, BlockPos pos, DyeColor baseColor) {
+   private static TextureKey buildTexture(BlockGetter world, BlockPos pos, DyeColor baseColor) {
       List<TextureKey.CompositeLayer> layers = new ArrayList<>();
-      layers.add(new TextureKey.CompositeLayer(Identifier.ofVanilla("textures/entity/banner_base.png"), -1));
-      layers.add(new TextureKey.CompositeLayer(Identifier.ofVanilla("textures/entity/banner/base.png"), baseColor.getEntityColor() & 0xFFFFFF));
+      //? if >=26.1 {
+      /*layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner/banner_base.png"), -1));
+      *///?} else
+      layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner_base.png"), -1));
+      layers.add(new TextureKey.CompositeLayer(Identifier.withDefaultNamespace("textures/entity/banner/base.png"), baseColor.getTextureDiffuseColor() & 0xFFFFFF));
       StringBuilder patterns = new StringBuilder();
       if (world.getBlockEntity(pos) instanceof BannerBlockEntity banner) {
          for (Layer layer : banner.getPatterns().layers()) {
             Identifier asset = layer.pattern().value().assetId();
             layers.add(
                new TextureKey.CompositeLayer(
-                  Identifier.of(asset.getNamespace(), "textures/entity/banner/" + asset.getPath() + ".png"), layer.color().getEntityColor() & 0xFFFFFF
+                  Identifier.fromNamespaceAndPath(asset.getNamespace(), "textures/entity/banner/" + asset.getPath() + ".png"), layer.color().getTextureDiffuseColor() & 0xFFFFFF
                )
             );
-            patterns.append(asset).append('#').append(layer.color().getId()).append(';');
+            patterns.append(asset).append('#').append(layer.color().getName()).append(';');
          }
       }
 
-      String id = "banner_" + baseColor.getId();
+      String id = "banner_" + baseColor.getName();
       if (!patterns.isEmpty()) {
          id = id + "_" + Integer.toHexString(patterns.toString().hashCode());
       }

@@ -1,15 +1,15 @@
 package com.norwood.meshify.export;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Direction.AxisDirection;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.Direction;
+import net.minecraft.core.Direction.AxisDirection;
 
 /** Merges coplanar full-block faces into large quads, each textured from a sheet the faces are painted onto. */
 public final class BakeCollector {
@@ -36,7 +36,7 @@ public final class BakeCollector {
    /** Takes a face lying on its block's {@code face} side and covering it whole; false leaves it to the plain mesh. */
    public boolean tryAdd(double blockX, double blockY, double blockZ, Direction face, TextureKey texture, float[][] positions, float[][] uv, int layer) {
       int axis = face.getAxis().ordinal();
-      boolean positive = face.getDirection() == AxisDirection.POSITIVE;
+      boolean positive = face.getAxisDirection() == AxisDirection.POSITIVE;
       double[] origin = new double[]{blockX, blockY, blockZ};
       float plane = (float)(origin[axis] + (positive ? 1 : 0));
 
@@ -247,7 +247,7 @@ public final class BakeCollector {
       return cells * this.uvSize + 2 * BORDER;
    }
 
-   private NativeImage renderSheet(List<BakeCollector.Placement> placements, int width, int height, MinecraftClient client, List<String> warnings) {
+   private NativeImage renderSheet(List<BakeCollector.Placement> placements, int width, int height, Minecraft client, List<String> warnings) {
       NativeImage sheet = new NativeImage(width, height, false);
       sheet.fillRect(0, 0, width, height, 0);
 
@@ -287,7 +287,7 @@ public final class BakeCollector {
             float fx = (px + 0.5F) / this.uvSize;
             int sx = Math.clamp((int)(bilerp(cornerUv, 0, fx, fy) * sourceWidth), 0, sourceWidth - 1);
             int sy = Math.clamp((int)(bilerp(cornerUv, 1, fx, fy) * sourceHeight), 0, sourceHeight - 1);
-            sheet.setColorArgb(sheetX + px, sheetY + py, source.getColorArgb(sx, sy));
+            sheet.setPixel(sheetX + px, sheetY + py, source.getPixel(sx, sy));
          }
       }
    }
@@ -313,14 +313,14 @@ public final class BakeCollector {
             int outX = x + dx;
             int outY = y + dy;
             if (outX >= 0 && outY >= 0 && outX < image.getWidth() && outY < image.getHeight()) {
-               image.setColorArgb(outX, outY, image.getColorArgb(x + Math.clamp(dx, 0, w - 1), y + srcY));
+               image.setPixel(outX, outY, image.getPixel(x + Math.clamp(dx, 0, w - 1), y + srcY));
             }
          }
       }
    }
 
    /** Loads each source texture once; a failed one is remembered as null, so it only warns once. */
-   private NativeImage loadSource(TextureKey texture, MinecraftClient client, List<String> warnings) {
+   private NativeImage loadSource(TextureKey texture, Minecraft client, List<String> warnings) {
       if (this.sources.containsKey(texture.id())) {
          return this.sources.get(texture.id());
       }

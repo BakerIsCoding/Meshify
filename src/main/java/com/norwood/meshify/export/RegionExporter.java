@@ -24,37 +24,42 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
-import net.minecraft.block.AbstractBannerBlock;
-import net.minecraft.block.AbstractSignBlock;
-import net.minecraft.block.AbstractSkullBlock;
-import net.minecraft.block.BedBlock;
-import net.minecraft.block.BellBlock;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockRenderType;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.ConduitBlock;
-import net.minecraft.block.DecoratedPotBlock;
-import net.minecraft.block.EnderChestBlock;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColors;
-import net.minecraft.client.render.block.BlockModels;
-import net.minecraft.client.render.model.BakedQuad;
-import net.minecraft.client.render.model.BlockModelPart;
-import net.minecraft.client.render.model.BlockStateModel;
-import net.minecraft.client.texture.Sprite;
-import net.minecraft.client.util.math.Vector2f;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockBox;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.random.Random;
+//? if >=26.1
+//import net.minecraft.client.color.block.BlockTintSource;
+import net.minecraft.client.multiplayer.ClientLevel;
+//? if >=26.1 {
+/*import net.minecraft.client.renderer.block.BlockStateModelSet;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+*///?} else {
+import net.minecraft.client.renderer.block.BlockModelShaper;
+import net.minecraft.client.renderer.block.model.BlockModelPart;
+//?}
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.AbstractBannerBlock;
+import net.minecraft.world.level.block.AbstractSkullBlock;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.BellBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.ConduitBlock;
+import net.minecraft.world.level.block.DecoratedPotBlock;
+import net.minecraft.world.level.block.EnderChestBlock;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3fc;
 
 public final class RegionExporter {
@@ -67,16 +72,16 @@ public final class RegionExporter {
    private RegionExporter() {
    }
 
-   public static Path exportRoot(MinecraftClient client) {
-      return client.runDirectory.toPath().resolve("meshify");
+   public static Path exportRoot(Minecraft client) {
+      return client.gameDirectory.toPath().resolve("meshify");
    }
 
-   public static Path outputDir(MinecraftClient client, String name) {
+   public static Path outputDir(Minecraft client, String name) {
       return exportRoot(client).resolve(name);
    }
 
    /** Writes a finished scan to disk off the client thread; {@code onStage} runs before each step and may throw to abort. */
-   public static RegionExporter.Result finish(MinecraftClient client, RegionExporter.Scan scan, Consumer<ExportStage> onStage) throws IOException {
+   public static RegionExporter.Result finish(Minecraft client, RegionExporter.Scan scan, Consumer<ExportStage> onStage) throws IOException {
       ExportOptions options = scan.options();
       MeshBuilder mesh = scan.mesh();
       List<String> warnings = scan.warnings();
@@ -112,28 +117,28 @@ public final class RegionExporter {
    }
 
    private static boolean neighborFullyOccludes(BlockState neighbor, Direction face) {
-      if (neighbor.isAir() || !neighbor.isOpaque()) {
+      if (neighbor.isAir() || !neighbor.canOcclude()) {
          return false;
-      } else if (neighbor.isOpaqueFullCube()) {
+      } else if (neighbor.isSolidRender()) {
          return true;
       }
 
       Direction side = face.getOpposite();
       try {
-         return Block.isFaceFullSquare(neighbor.getCullingFace(side), side);
+         return Block.isFaceFull(neighbor.getFaceOcclusionShape(side), side);
       } catch (Exception exception) {
          return false;
       }
    }
 
-   public static int countUnloadedChunks(ClientWorld world, BlockPos min, BlockPos max) {
+   public static int countUnloadedChunks(ClientLevel world, BlockPos min, BlockPos max) {
       int unloaded = 0;
-      ChunkPos first = new ChunkPos(min);
-      ChunkPos last = new ChunkPos(max);
+      int lastX = SectionPos.blockToSectionCoord(max.getX());
+      int lastZ = SectionPos.blockToSectionCoord(max.getZ());
 
-      for (int x = first.x; x <= last.x; x++) {
-         for (int z = first.z; z <= last.z; z++) {
-            if (!world.getChunkManager().isChunkLoaded(x, z)) {
+      for (int x = SectionPos.blockToSectionCoord(min.getX()); x <= lastX; x++) {
+         for (int z = SectionPos.blockToSectionCoord(min.getZ()); z <= lastZ; z++) {
+            if (!world.getChunkSource().hasChunk(x, z)) {
                unloaded++;
             }
          }
@@ -143,7 +148,7 @@ public final class RegionExporter {
    }
 
    /** Smallest box around the non-air blocks, if any; unloaded chunks read as air, so check them first. */
-   public static Optional<BlockBox> solidBounds(ClientWorld world, BlockPos min, BlockPos max) {
+   public static Optional<BoundingBox> solidBounds(ClientLevel world, BlockPos min, BlockPos max) {
       // ponytail: reads every block on the client thread (~1 s at the limit); skip empty chunk sections if it stalls.
       int loX = Integer.MAX_VALUE;
       int loY = Integer.MAX_VALUE;
@@ -152,7 +157,7 @@ public final class RegionExporter {
       int hiY = Integer.MIN_VALUE;
       int hiZ = Integer.MIN_VALUE;
 
-      for (BlockPos pos : BlockPos.iterate(min, max)) {
+      for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
          if (!world.getBlockState(pos).isAir()) {
             loX = Math.min(loX, pos.getX());
             loY = Math.min(loY, pos.getY());
@@ -163,7 +168,7 @@ public final class RegionExporter {
          }
       }
 
-      return loX > hiX ? Optional.empty() : Optional.of(new BlockBox(loX, loY, loZ, hiX, hiY, hiZ));
+      return loX > hiX ? Optional.empty() : Optional.of(new BoundingBox(loX, loY, loZ, hiX, hiY, hiZ));
    }
 
    private static void writeInfoFile(RegionExporter.Scan scan, RegionExporter.Result result) {
@@ -233,17 +238,20 @@ public final class RegionExporter {
       /** Reading the clock costs about as much as skipping an air block, so it is read every 256 blocks. */
       private static final int CLOCK_CHECK_MASK = 0xFF;
 
-      private final MinecraftClient client;
-      private final ClientWorld world;
+      private final Minecraft client;
+      private final ClientLevel world;
       private final BlockPos min;
       private final BlockPos max;
       private final ExportOptions options;
-      private final BlockBox bounds;
+      private final BoundingBox bounds;
       private final MeshBuilder mesh = new MeshBuilder();
       private final BakeCollector baker;
-      private final BlockModels models;
+      //? if >=26.1 {
+      /*private final BlockStateModelSet models;
+      *///?} else
+      private final BlockModelShaper models;
       private final BlockColors colors;
-      private final Random random = Random.create();
+      private final RandomSource random = RandomSource.create();
       private final List<String> warnings = new ArrayList<>();
       private final Set<String> skippedTypes = new LinkedHashSet<>();
       private final Iterator<BlockPos> cursor;
@@ -252,24 +260,27 @@ public final class RegionExporter {
       private int exportedBlocks;
 
       public Scanner(BlockPos firstCorner, BlockPos secondCorner, ExportOptions options) {
-         this.client = MinecraftClient.getInstance();
-         this.world = this.client.world;
-         this.bounds = BlockBox.create(firstCorner, secondCorner);
-         this.min = new BlockPos(this.bounds.getMinX(), this.bounds.getMinY(), this.bounds.getMinZ());
-         this.max = new BlockPos(this.bounds.getMaxX(), this.bounds.getMaxY(), this.bounds.getMaxZ());
+         this.client = Minecraft.getInstance();
+         this.world = this.client.level;
+         this.bounds = BoundingBox.fromCorners(firstCorner, secondCorner);
+         this.min = new BlockPos(this.bounds.minX(), this.bounds.minY(), this.bounds.minZ());
+         this.max = new BlockPos(this.bounds.maxX(), this.bounds.maxY(), this.bounds.maxZ());
          this.options = options;
          this.baker = options.bake() ? new BakeCollector(options.bakeUvSize(), options.bakeMaxAtlas()) : null;
-         this.models = this.client.getBlockRenderManager().getModels();
+         //? if >=26.1 {
+         /*this.models = this.client.getModelManager().getBlockStateModelSet();
+         *///?} else
+         this.models = this.client.getBlockRenderer().getBlockModelShaper();
          this.colors = this.client.getBlockColors();
-         this.cursor = BlockPos.iterate(this.min, this.max).iterator();
-         this.volume = (long)this.bounds.getBlockCountX() * this.bounds.getBlockCountY() * this.bounds.getBlockCountZ();
+         this.cursor = BlockPos.betweenClosed(this.min, this.max).iterator();
+         this.volume = (long)this.bounds.getXSpan() * this.bounds.getYSpan() * this.bounds.getZSpan();
          int unloadedChunks = countUnloadedChunks(this.world, this.min, this.max);
          if (unloadedChunks > 0) {
             this.warnings.add(unloadedChunks + " chunk(s) in range are not loaded; those blocks export as air");
          }
       }
 
-      public ClientWorld world() {
+      public ClientLevel world() {
          return this.world;
       }
 
@@ -328,11 +339,17 @@ public final class RegionExporter {
          } else if (block instanceof ChestBlock || block instanceof EnderChestBlock) {
             ChestExporter.export(this.mesh, state, blockX, blockY, blockZ);
             exported = true;
-         } else if (block instanceof AbstractSignBlock sign) {
+         } else if (block instanceof SignBlock sign) {
             exported |= SignExporter.export(this.mesh, this.client, this.world, pos, state, sign, blockX, blockY, blockZ, this.warnings);
+            // From 26.2 the sign board is a block model, and its renderer only draws the text.
+            //? if >=26.2
+            //exported |= this.exportModelBlock(state, pos);
+         // From 26.2 beds are plain block models, exported below like any other block.
+         //? if <26.2 {
          } else if (block instanceof BedBlock bed) {
             BedExporter.export(this.mesh, state, bed, blockX, blockY, blockZ);
             exported = true;
+         //?}
          } else if (block instanceof ShulkerBoxBlock shulkerBox) {
             ShulkerExporter.export(this.mesh, state, shulkerBox, blockX, blockY, blockZ);
             exported = true;
@@ -359,30 +376,36 @@ public final class RegionExporter {
                }
             }
 
-            if (state.getRenderType() == BlockRenderType.MODEL) {
+            if (state.getRenderShape() == RenderShape.MODEL) {
                exported |= this.exportModelBlock(state, pos);
             }
          }
 
          if (!exported) {
-            this.skippedTypes.add(Registries.BLOCK.getId(block).toString());
+            this.skippedTypes.add(BuiltInRegistries.BLOCK.getKey(block).toString());
          }
 
          return exported;
       }
 
       private boolean exportModelBlock(BlockState state, BlockPos pos) {
-         BlockStateModel model = this.models.getModel(state);
-         this.random.setSeed(state.getRenderingSeed(pos));
-         List<BlockModelPart> parts = model.getParts(this.random);
+         this.random.setSeed(state.getSeed(pos));
+         //? if >=26.1 {
+         /*List<BlockStateModelPart> parts = new ArrayList<>();
+         this.models.get(state).collectParts(this.random, parts);
+         *///?} else
+         List<BlockModelPart> parts = this.models.getBlockModel(state).collectParts(this.random);
          if (parts.isEmpty()) {
             return false;
          }
 
          BlockPos local = pos.subtract(this.min);
-         QuadContext context = new QuadContext(state, pos, state.getModelOffset(pos), local.getX(), local.getY(), local.getZ(), state.getLuminance() > 0);
+         QuadContext context = new QuadContext(state, pos, state.getOffset(pos), local.getX(), local.getY(), local.getZ(), state.getLightEmission() > 0);
          boolean hasQuads = false;
 
+         //? if >=26.1 {
+         /*for (BlockStateModelPart part : parts) {
+         *///?} else
          for (BlockModelPart part : parts) {
             for (Direction face : QUAD_FACES) {
                List<BakedQuad> quads = part.getQuads(face);
@@ -406,32 +429,36 @@ public final class RegionExporter {
 
       /** Faces on the region boundary always stay, so the cut edge of a build is not left open. */
       private boolean isHidden(BlockState state, BlockPos pos, Direction face) {
-         BlockPos neighborPos = pos.offset(face);
-         if (!this.bounds.contains(neighborPos)) {
+         BlockPos neighborPos = pos.relative(face);
+         if (!this.bounds.isInside(neighborPos)) {
             return false;
          }
 
          BlockState neighbor = this.world.getBlockState(neighborPos);
-         return !Block.shouldDrawSide(state, neighbor, face) || this.options.aggressiveCull() && neighborFullyOccludes(neighbor, face);
+         return !Block.shouldRenderFace(state, neighbor, face) || this.options.aggressiveCull() && neighborFullyOccludes(neighbor, face);
       }
 
       private void exportQuad(BakedQuad quad, Direction face, QuadContext context) {
-         Sprite sprite = quad.sprite();
+         TextureAtlasSprite sprite = BakedQuads.sprite(quad);
          if (sprite == null) {
             return;
          }
 
-         int tint = quad.tintIndex() >= 0 ? this.colors.getColor(context.state(), this.world, context.pos(), quad.tintIndex()) : -1;
+         int tintIndex = BakedQuads.tintIndex(quad);
+         //? if >=26.1 {
+         /*BlockTintSource tintSource = tintIndex >= 0 ? this.colors.getTintSource(context.state(), tintIndex) : null;
+         int tint = tintSource != null ? tintSource.colorInWorld(context.state(), this.world, context.pos()) : -1;
+         *///?} else
+         int tint = tintIndex >= 0 ? this.colors.getColor(context.state(), this.world, context.pos(), tintIndex) : -1;
          float[][] positions = new float[4][3];
          float[][] uvs = new float[4][];
 
          for (int k = 0; k < 4; k++) {
-            Vector3fc vertex = quad.getPosition(k);
+            Vector3fc vertex = BakedQuads.position(quad, k);
             positions[k][0] = (float)(context.blockX() + vertex.x() + context.offset().x);
             positions[k][1] = (float)(context.blockY() + vertex.y() + context.offset().y);
             positions[k][2] = (float)(context.blockZ() + vertex.z() + context.offset().z);
-            long texcoords = quad.getTexcoords(k);
-            uvs[k] = TextureKey.spriteUv(sprite, Vector2f.getX(texcoords), Vector2f.getY(texcoords));
+            uvs[k] = BakedQuads.spriteUv(quad, sprite, k);
          }
 
          TextureKey texture = TextureKey.sprite(sprite, tint);
@@ -443,14 +470,14 @@ public final class RegionExporter {
             this.mesh.markEmissive(texture.id());
          }
 
-         Vector3fc normal = quad.face().getFloatVector();
+         Vector3fc normal = quad.direction().getUnitVec3f();
          this.mesh.addQuad(texture, positions, uvs, new float[]{normal.x(), normal.y(), normal.z()});
       }
    }
 
-   private record QuadContext(BlockState state, BlockPos pos, Vec3d offset, double blockX, double blockY, double blockZ, boolean emissive) {
+   private record QuadContext(BlockState state, BlockPos pos, Vec3 offset, double blockX, double blockY, double blockZ, boolean emissive) {
       int bakeLayer() {
-         return (this.state.isOpaque() ? BakeCollector.LAYER_SOLID : BakeCollector.LAYER_ALPHA) | (this.emissive ? BakeCollector.LAYER_EMISSIVE : 0);
+         return (this.state.canOcclude() ? BakeCollector.LAYER_SOLID : BakeCollector.LAYER_ALPHA) | (this.emissive ? BakeCollector.LAYER_EMISSIVE : 0);
       }
    }
 

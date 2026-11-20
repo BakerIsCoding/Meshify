@@ -244,7 +244,8 @@ public final class GlbWriter {
             joined.append(',');
          }
 
-         joined.append(String.format(Locale.ROOT, "%.6f", v[i]));
+         // Shortest text that parses back to the same float; rounding would break the accessor bounds.
+         joined.append(v[i]);
       }
 
       return joined.toString();
@@ -402,6 +403,7 @@ public final class GlbWriter {
       check(json.contains("KHR_materials_unlit"), "unlit extension declared");
       check(json.contains("\"magFilter\":9728"), "nearest sampling");
       check(!json.contains("NORMAL"), "no normal attribute");
+      check(Float.parseFloat(join(new float[]{0.9930997F})) == 0.9930997F, "accessor bounds keep full float precision");
       java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"buffers\":\\[\\{\"byteLength\":(\\d+)").matcher(json);
       check(matcher.find(), "buffer declared");
       int declared = Integer.parseInt(matcher.group(1));
