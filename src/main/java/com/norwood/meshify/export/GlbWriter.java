@@ -33,6 +33,10 @@ public final class GlbWriter {
    private static final int BIN_CHUNK = 0x004E4942;
    private static final int HEADER_BYTES = 12;
    private static final int CHUNK_HEADER_BYTES = 8;
+   // glTF pads the JSON chunk with spaces and the BIN chunk with zeros.
+   private static final byte JSON_PADDING = ' ';
+   private static final byte BIN_PADDING = 0;
+   private static final int MAX_UNSIGNED_SHORT = 0xFFFF;
 
    private GlbWriter() {
    }
@@ -44,15 +48,12 @@ public final class GlbWriter {
       BLEND
    }
 
-   // uvs places each texture key in the atlas; a key missing from either map counts as untransformed and opaque.
-   public static void write(
-      Path outputDir, String name, byte[] atlasPng, MeshBuilder mesh, Map<String, UvTransform> uvs, Map<String, AlphaMode> alphaModes
-   ) throws IOException {
+   public static void write(Path file, MeshBuilder mesh, GlbWriter.Atlas atlas) throws IOException {
       Map<AlphaMode, Bucket> buckets = new EnumMap<>(AlphaMode.class);
 
       for (Map.Entry<String, List<MeshBuilder.Quad>> entry : mesh.quads().entrySet()) {
-         UvTransform uv = uvs.getOrDefault(entry.getKey(), UvTransform.IDENTITY);
-         Bucket bucket = buckets.computeIfAbsent(alphaModes.getOrDefault(entry.getKey(), AlphaMode.OPAQUE), mode -> new Bucket());
+         UvTransform uv = atlas.uvs().getOrDefault(entry.getKey(), UvTransform.IDENTITY);
+         Bucket bucket = buckets.computeIfAbsent(atlas.alphaModes().getOrDefault(entry.getKey(), AlphaMode.OPAQUE), mode -> new Bucket());
          // Emissive faces skip the directional shading, or an unlit export makes them look like dead stone.
          boolean emissive = mesh.emissiveTextureIds().contains(entry.getKey());
 
@@ -71,18 +72,18 @@ public final class GlbWriter {
          }
       }
 
-      Files.write(outputDir.resolve(name + ".glb"), build(buckets, atlasPng));
+      Files.write(file, build(buckets, atlas.png()));
    }
 
    // Minecraft's face shading: top 1.0, north/south 0.8, east/west 0.6, bottom 0.5.
    static byte shadeByte(float[] normal) {
-      float ax = Math.abs(normal[0]);
-      float ay = Math.abs(normal[1]);
-      float az = Math.abs(normal[2]);
+      float absX = Math.abs(normal[0]);
+      float absY = Math.abs(normal[1]);
+      float absZ = Math.abs(normal[2]);
       float shade;
-      if (ay >= ax && ay >= az) {
+      if (absY >= absX && absY >= absZ) {
          shade = normal[1] >= 0.0F ? 1.0F : 0.5F;
-      } else if (az >= ax) {
+      } else if (absZ >= absX) {
          shade = 0.8F;
       } else {
          shade = 0.6F;
@@ -92,8 +93,8 @@ public final class GlbWriter {
    }
 
    // The game shades in sRGB but glTF's COLOR_0 is linear, so the factor is stored linearised.
-   private static float srgbToLinear(float c) {
-      return c <= 0.04045F ? c / 12.92F : (float)Math.pow((c + 0.055F) / 1.055F, 2.4);
+   private static float srgbToLinear(float channel) {
+      return channel <= 0.04045F ? channel / 12.92F : (float)Math.pow((channel + 0.055F) / 1.055F, 2.4);
    }
 
    private static byte[] build(Map<AlphaMode, Bucket> buckets, byte[] atlasPng) throws IOException {
@@ -117,7 +118,7 @@ public final class GlbWriter {
          int color = accessor(bin, bufferViews, accessors, bucket.colors(), ARRAY_BUFFER, UNSIGNED_BYTE, "VEC4", vertexCount, true, null);
 
          // uint16 indices while the bucket fits, which halves the index block on most exports.
-         boolean shortIndices = vertexCount <= 65535;
+         boolean shortIndices = vertexCount <= MAX_UNSIGNED_SHORT;
          int indices = accessor(
             bin,
             bufferViews,
@@ -217,26 +218,26 @@ public final class GlbWriter {
       int jsonPad = (4 - json.length % 4) % 4;
       int binPad = (4 - bin.length % 4) % 4;
       int total = HEADER_BYTES + CHUNK_HEADER_BYTES + json.length + jsonPad + CHUNK_HEADER_BYTES + bin.length + binPad;
-      ByteBuffer buf = ByteBuffer.allocate(total).order(ByteOrder.LITTLE_ENDIAN);
-      buf.putInt(GLB_MAGIC);
-      buf.putInt(GLB_VERSION);
-      buf.putInt(total);
+      ByteBuffer buffer = ByteBuffer.allocate(total).order(ByteOrder.LITTLE_ENDIAN);
+      buffer.putInt(GLB_MAGIC);
+      buffer.putInt(GLB_VERSION);
+      buffer.putInt(total);
 
-      buf.putInt(json.length + jsonPad);
-      buf.putInt(JSON_CHUNK);
-      buf.put(json);
+      buffer.putInt(json.length + jsonPad);
+      buffer.putInt(JSON_CHUNK);
+      buffer.put(json);
       for (int i = 0; i < jsonPad; i++) {
-         buf.put((byte)0x20); // the JSON chunk pads with spaces
+         buffer.put(JSON_PADDING);
       }
 
-      buf.putInt(bin.length + binPad);
-      buf.putInt(BIN_CHUNK);
-      buf.put(bin);
+      buffer.putInt(bin.length + binPad);
+      buffer.putInt(BIN_CHUNK);
+      buffer.put(bin);
       for (int i = 0; i < binPad; i++) {
-         buf.put((byte)0);
+         buffer.put(BIN_PADDING);
       }
 
-      return buf.array();
+      return buffer.array();
    }
 
    private static void pad(ByteArrayOutputStream out, int align) {
@@ -312,48 +313,52 @@ public final class GlbWriter {
       }
 
       byte[] positions() {
-         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 12).order(ByteOrder.LITTLE_ENDIAN);
+         ByteBuffer buffer = ByteBuffer.allocate(this.vertices.size() * 3 * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
-            buf.putFloat(vertex.x()).putFloat(vertex.y()).putFloat(vertex.z());
+            buffer.putFloat(vertex.x()).putFloat(vertex.y()).putFloat(vertex.z());
          }
 
-         return buf.array();
+         return buffer.array();
       }
 
       byte[] texcoords() {
-         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 8).order(ByteOrder.LITTLE_ENDIAN);
+         ByteBuffer buffer = ByteBuffer.allocate(this.vertices.size() * 2 * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
-            buf.putFloat(vertex.u()).putFloat(vertex.v());
+            buffer.putFloat(vertex.u()).putFloat(vertex.v());
          }
 
-         return buf.array();
+         return buffer.array();
       }
 
       byte[] colors() {
          // Grey, so r=g=b; VEC4 because glTF wants attribute elements 4-byte aligned.
-         ByteBuffer buf = ByteBuffer.allocate(this.vertices.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
+         ByteBuffer buffer = ByteBuffer.allocate(this.vertices.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
          for (Vertex vertex : this.vertices) {
-            buf.put(vertex.shade()).put(vertex.shade()).put(vertex.shade()).put((byte)255);
+            buffer.put(vertex.shade()).put(vertex.shade()).put(vertex.shade()).put((byte)255);
          }
 
-         return buf.array();
+         return buffer.array();
       }
 
       byte[] indices(boolean shortIndices) {
-         ByteBuffer buf = ByteBuffer.allocate(this.indexCount * (shortIndices ? 2 : 4)).order(ByteOrder.LITTLE_ENDIAN);
+         ByteBuffer buffer = ByteBuffer.allocate(this.indexCount * (shortIndices ? Short.BYTES : Integer.BYTES)).order(ByteOrder.LITTLE_ENDIAN);
          for (int i = 0; i < this.indexCount; i++) {
             if (shortIndices) {
-               buf.putShort((short)this.indices[i]);
+               buffer.putShort((short)this.indices[i]);
             } else {
-               buf.putInt(this.indices[i]);
+               buffer.putInt(this.indices[i]);
             }
          }
 
-         return buf.array();
+         return buffer.array();
       }
    }
 
    private record Vertex(float x, float y, float z, float u, float v, byte shade) {
+   }
+
+   // The atlas PNG, where each texture key sits in it and how it blends; a key missing from a map is untransformed and opaque.
+   public record Atlas(byte[] png, Map<String, UvTransform> uvs, Map<String, AlphaMode> alphaModes) {
    }
 
    // Run with gradlew glbCheck.
@@ -375,30 +380,32 @@ public final class GlbWriter {
       mesh.addQuad(leaves, positions, uv, up);
 
       Path dir = Files.createTempDirectory("meshify-check");
+      Path file = dir.resolve("check.glb");
       write(
-         dir,
-         "check",
-         new byte[]{1, 2, 3},
+         file,
          mesh,
-         Map.of("stone", UvTransform.IDENTITY, "leaves", UvTransform.IDENTITY),
-         Map.of("stone", AlphaMode.OPAQUE, "leaves", AlphaMode.MASK)
+         new GlbWriter.Atlas(
+            new byte[]{1, 2, 3},
+            Map.of("stone", UvTransform.IDENTITY, "leaves", UvTransform.IDENTITY),
+            Map.of("stone", AlphaMode.OPAQUE, "leaves", AlphaMode.MASK)
+         )
       );
 
-      byte[] glb = Files.readAllBytes(dir.resolve("check.glb"));
-      ByteBuffer buf = ByteBuffer.wrap(glb).order(ByteOrder.LITTLE_ENDIAN);
-      check(buf.getInt() == GLB_MAGIC, "glTF magic");
-      check(buf.getInt() == GLB_VERSION, "glTF version 2");
-      check(buf.getInt() == glb.length, "header length matches the file");
+      byte[] glb = Files.readAllBytes(file);
+      ByteBuffer reader = ByteBuffer.wrap(glb).order(ByteOrder.LITTLE_ENDIAN);
+      check(reader.getInt() == GLB_MAGIC, "glTF magic");
+      check(reader.getInt() == GLB_VERSION, "glTF version 2");
+      check(reader.getInt() == glb.length, "header length matches the file");
 
-      int jsonLength = buf.getInt();
-      check(buf.getInt() == JSON_CHUNK, "first chunk is JSON");
+      int jsonLength = reader.getInt();
+      check(reader.getInt() == JSON_CHUNK, "first chunk is JSON");
       check(jsonLength % 4 == 0, "JSON chunk is 4-byte aligned");
       byte[] jsonBytes = new byte[jsonLength];
-      buf.get(jsonBytes);
+      reader.get(jsonBytes);
       String json = new String(jsonBytes, StandardCharsets.UTF_8).trim();
 
-      int binLength = buf.getInt();
-      check(buf.getInt() == BIN_CHUNK, "second chunk is BIN");
+      int binLength = reader.getInt();
+      check(reader.getInt() == BIN_CHUNK, "second chunk is BIN");
       check(binLength % 4 == 0, "BIN chunk is 4-byte aligned");
       check(HEADER_BYTES + CHUNK_HEADER_BYTES + jsonLength + CHUNK_HEADER_BYTES + binLength == glb.length, "chunks fill the file exactly");
 
@@ -418,7 +425,7 @@ public final class GlbWriter {
       // The BIN chunk is padded up to a 4-byte boundary, so it can exceed the buffer by 1-3 bytes.
       check(declared <= binLength && binLength - declared < 4, "declared buffer length matches the BIN chunk");
 
-      Files.delete(dir.resolve("check.glb"));
+      Files.delete(file);
       Files.delete(dir);
       System.out.println("GlbWriter self-check passed");
    }

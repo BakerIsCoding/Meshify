@@ -1,12 +1,12 @@
 package com.norwood.meshify.export.special;
 
+import com.norwood.meshify.export.BlockContext;
 import com.norwood.meshify.export.BoxUv;
-import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.core.Vec3i;
 import net.minecraft.resources.Identifier;
 //? if >=26.4
 //import net.minecraft.util.CommonColors;
@@ -18,46 +18,45 @@ import net.minecraft.world.level.block.entity.BannerBlockEntity;
 import net.minecraft.world.level.block.entity.BannerPatternLayers.Layer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 
 public final class BannerExporter {
    private BannerExporter() {
    }
 
    // The cuboids are the banner model's, at the 2/3 scale its renderer draws it, so each unwrap is sized apart from its box.
-   public static void export(
-      MeshBuilder mesh, BlockGetter world, BlockPos pos, BlockState state, AbstractBannerBlock block, double blockX, double blockY, double blockZ
-   ) {
-      TextureKey texture = buildTexture(world, pos, block.getColor());
+   public static void export(BlockContext context, AbstractBannerBlock block) {
+      BlockState state = context.state();
+      TextureKey texture = buildTexture(context.world(), context.pos(), block.getColor());
       if (state.hasProperty(BannerBlock.ROTATION)) {
-         double yaw = Yaw.ofRotation(state);
+         BoxUv banner = new BoxUv(context.placement(Yaw.ofRotation(state)), texture, 64, 64);
          // Pole, crossbar, flag.
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            7.333333333333333, 0.0, 7.333333333333333, 8.666666666666666, 28.0, 8.666666666666666,
-            44, 0, 2, 42, 2, 64, 64, yaw, 0.0, Direction.UP, false
+         banner.box(
+            new AABB(7.333333333333333, 0.0, 7.333333333333333, 8.666666666666666, 28.0, 8.666666666666666), 44, 0, new Vec3i(2, 42, 2)
          );
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            1.333333333333334, 28.0, 7.333333333333333, 14.666666666666666, 29.333333333333332, 8.666666666666666,
-            0, 42, 20, 2, 2, 64, 64, yaw, 0.0, Direction.UP, false
+         banner.box(
+            new AABB(1.333333333333334, 28.0, 7.333333333333333, 14.666666666666666, 29.333333333333332, 8.666666666666666), 0, 42, new Vec3i(20, 2, 2)
          );
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            1.333333333333334, 2.6666666666666665, 6.666666666666667, 14.666666666666666, 29.333333333333332, 7.333333333333333,
-            0, 0, 20, 40, 1, 64, 64, yaw, 0.0, Direction.UP, false
+         banner.box(
+            new AABB(1.333333333333334, 2.6666666666666665, 6.666666666666667, 14.666666666666666, 29.333333333333332, 7.333333333333333),
+            0,
+            0,
+            new Vec3i(20, 40, 1)
          );
       } else {
-         double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
+         BoxUv banner = new BoxUv(context.placement(Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING))), texture, 64, 64);
          // Crossbar, flag.
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            1.333333333333334, 12.333333333333332, 14.333333333333334, 14.666666666666666, 13.666666666666666, 15.666666666666666,
-            0, 42, 20, 2, 2, 64, 64, yaw, 0.0, Direction.UP, false
+         banner.box(
+            new AABB(1.333333333333334, 12.333333333333332, 14.333333333333334, 14.666666666666666, 13.666666666666666, 15.666666666666666),
+            0,
+            42,
+            new Vec3i(20, 2, 2)
          );
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            1.333333333333334, -12.999999999999998, 13.666666666666668, 14.666666666666666, 13.666666666666666, 14.333333333333334,
-            0, 0, 20, 40, 1, 64, 64, yaw, 0.0, Direction.UP, false
+         banner.box(
+            new AABB(1.333333333333334, -12.999999999999998, 13.666666666666668, 14.666666666666666, 13.666666666666666, 14.333333333333334),
+            0,
+            0,
+            new Vec3i(20, 40, 1)
          );
       }
    }

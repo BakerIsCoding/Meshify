@@ -30,6 +30,8 @@ public class MeshifyClientGameTest implements FabricClientGameTest {
    // The 17 x 7 grass floor of the region plus the 16 blocks placed on it.
    private static final int BLOCK_COUNT = 135;
    private static final int ENTITY_COUNT = 3;
+   // Block entity data (sign text, banner patterns) arrives in packets of its own, a moment after the blocks.
+   private static final int BLOCK_ENTITY_SYNC_TICKS = 20;
    // The flat test world has grass at y -61: water goes into the ground so it cannot spread, the rest stands on it.
    private static final List<String> SCENE = List.of(
       "setblock 1 -60 1 minecraft:stone",
@@ -86,8 +88,7 @@ public class MeshifyClientGameTest implements FabricClientGameTest {
       try (TestSingleplayerContext world = context.worldBuilder().create()) {
          SCENE.forEach(world.getServer()::runCommand);
          context.waitFor(client -> client.level.getEntities((Entity) null, REGION, entity -> !(entity instanceof Player)).size() == ENTITY_COUNT);
-         // Block entity data (sign text, banner patterns) arrives in packets of its own.
-         context.waitTicks(20);
+         context.waitTicks(BLOCK_ENTITY_SYNC_TICKS);
 
          meshify(context, "meshify start 0 -61 0");
          meshify(context, "meshify end 16 -58 6");
@@ -154,7 +155,8 @@ public class MeshifyClientGameTest implements FabricClientGameTest {
          problems.add("expected " + expected + ", exported " + exported);
       }
 
-      problems.addAll(checkObj(dir.resolve(name + ".obj"), !options.contains("bake")));
+      // Baking paints the textures onto shared sheets, so a baked OBJ has none of the per-texture groups.
+      problems.addAll(checkObj(dir.resolve(name + ".obj"), options.contains("bake") ? List.of() : EXPECTED_GROUPS));
       problems.addAll(checkMtl(dir, dir.resolve(name + ".mtl")));
       Path glb = dir.resolve(name + ".glb");
       if (!separate && !(Files.exists(glb) && new String(Files.readAllBytes(glb), 0, 4).equals("glTF"))) {
@@ -164,8 +166,8 @@ public class MeshifyClientGameTest implements FabricClientGameTest {
       return problems;
    }
 
-   // Every face must point at vertices, UVs and normals that exist.
-   private static List<String> checkObj(Path obj, boolean checkGroups) throws IOException {
+   // Every face must point at vertices, UVs and normals that exist, and every expected group must show up.
+   private static List<String> checkObj(Path obj, List<String> expectedGroups) throws IOException {
       List<String> problems = new ArrayList<>();
       int[] counts = new int[3];
       int faces = 0;
@@ -199,11 +201,9 @@ public class MeshifyClientGameTest implements FabricClientGameTest {
          problems.add("the OBJ has no faces");
       }
 
-      if (checkGroups) {
-         for (String expected : EXPECTED_GROUPS) {
-            if (groups.stream().noneMatch(group -> group.contains(expected))) {
-               problems.add("no OBJ group containing '" + expected + "'");
-            }
+      for (String expected : expectedGroups) {
+         if (groups.stream().noneMatch(group -> group.contains(expected))) {
+            problems.add("no OBJ group containing '" + expected + "'");
          }
       }
 

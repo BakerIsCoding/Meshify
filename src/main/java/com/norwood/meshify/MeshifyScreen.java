@@ -42,13 +42,15 @@ final class MeshifyScreen extends Screen {
    private static final int LINE_HEIGHT = 10;
    private static final int HEADINGS_TOP = 14;
    private static final int COLUMNS_TOP = 28;
-   // Where the selection buttons start, under the four lines describing the selection.
-   private static final int SELECTION_BUTTONS_TOP = COLUMNS_TOP + 4 * LINE_HEIGHT + 4;
+   // Where the selection buttons start, a gap under the four lines describing the selection.
+   private static final int SELECTION_BUTTONS_TOP = COLUMNS_TOP + 4 * LINE_HEIGHT + BUTTON_GAP;
    private static final int STATUS_TOP = 194;
    private static final int STATUS_LINES = 2;
    // Title, both columns, the status lines and the bottom buttons; fits a 240-pixel-tall GUI.
    private static final int CONTENT_HEIGHT = 236;
    private static final int PANEL_PADDING = 6;
+   // How far the title stays from the top edge when the window is too short to centre the menu.
+   private static final int MIN_PANEL_TOP = 4;
    private static final int PANEL_COLOR = 0x90000000;
    private static final int TEXT_COLOR = 0xFFFFFFFF;
    private static final String MESSAGE_PREFIX = "[Meshify] ";
@@ -104,7 +106,7 @@ final class MeshifyScreen extends Screen {
 
    @Override
    protected void init() {
-      this.panelTop = Math.max(4, (this.height - CONTENT_HEIGHT) / 2);
+      this.panelTop = Math.max(MIN_PANEL_TOP, (this.height - CONTENT_HEIGHT) / 2);
       this.leftColumnX = this.width / 2 - COLUMN_WIDTH - COLUMN_GAP / 2;
       this.rightColumnX = this.width / 2 + COLUMN_GAP / 2;
       this.initSelectionColumn(this.panelTop + SELECTION_BUTTONS_TOP);

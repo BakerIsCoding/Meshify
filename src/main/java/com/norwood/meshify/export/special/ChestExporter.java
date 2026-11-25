@@ -1,7 +1,7 @@
 package com.norwood.meshify.export.special;
 
+import com.norwood.meshify.export.BlockContext;
 import com.norwood.meshify.export.BoxUv;
-import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Blocks;
@@ -9,12 +9,14 @@ import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.phys.AABB;
 
 public final class ChestExporter {
    private ChestExporter() {
    }
 
-   public static void export(MeshBuilder mesh, BlockState state, double blockX, double blockY, double blockZ) {
+   public static void export(BlockContext context) {
+      BlockState state = context.state();
       double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING).getOpposite());
       boolean ender = state.getBlock() == Blocks.ENDER_CHEST;
       ChestType type = !ender && state.hasProperty(ChestBlock.TYPE) ? state.getValue(ChestBlock.TYPE) : ChestType.SINGLE;
@@ -25,42 +27,24 @@ public final class ChestExporter {
          case SINGLE -> "";
       };
       TextureKey texture = TextureKey.resource(Identifier.withDefaultNamespace("textures/entity/chest/" + kind + half + ".png"));
+      BoxUv chest = new BoxUv(context.placement(yaw), texture, 64, 64).upright();
+      // Bottom, lid and latch.
       switch (type) {
          case SINGLE -> {
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 1.0, 0.0, 1.0, 15.0, 10.0, 15.0, 0, 19, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 1.0, 9.0, 1.0, 15.0, 14.0, 15.0, 0, 0, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 7.0, 7.0, 15.0, 9.0, 11.0, 16.0, 0, 0, yaw);
+            chest.box(new AABB(1.0, 0.0, 1.0, 15.0, 10.0, 15.0), 0, 19);
+            chest.box(new AABB(1.0, 9.0, 1.0, 15.0, 14.0, 15.0), 0, 0);
+            chest.box(new AABB(7.0, 7.0, 15.0, 9.0, 11.0, 16.0), 0, 0);
          }
          case RIGHT -> {
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 1.0, 0.0, 1.0, 16.0, 10.0, 15.0, 0, 19, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 1.0, 9.0, 1.0, 16.0, 14.0, 15.0, 0, 0, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 15.0, 7.0, 15.0, 16.0, 11.0, 16.0, 0, 0, yaw);
+            chest.box(new AABB(1.0, 0.0, 1.0, 16.0, 10.0, 15.0), 0, 19);
+            chest.box(new AABB(1.0, 9.0, 1.0, 16.0, 14.0, 15.0), 0, 0);
+            chest.box(new AABB(15.0, 7.0, 15.0, 16.0, 11.0, 16.0), 0, 0);
          }
          case LEFT -> {
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 0.0, 0.0, 1.0, 15.0, 10.0, 15.0, 0, 19, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 0.0, 9.0, 1.0, 15.0, 14.0, 15.0, 0, 0, yaw);
-            uprightBox(mesh, texture, blockX, blockY, blockZ, 0.0, 7.0, 15.0, 1.0, 11.0, 16.0, 0, 0, yaw);
+            chest.box(new AABB(0.0, 0.0, 1.0, 15.0, 10.0, 15.0), 0, 19);
+            chest.box(new AABB(0.0, 9.0, 1.0, 15.0, 14.0, 15.0), 0, 0);
+            chest.box(new AABB(0.0, 7.0, 15.0, 1.0, 11.0, 16.0), 0, 0);
          }
       }
-   }
-
-   private static void uprightBox(
-      MeshBuilder mesh,
-      TextureKey texture,
-      double blockX,
-      double blockY,
-      double blockZ,
-      double x0,
-      double y0,
-      double z0,
-      double x1,
-      double y1,
-      double z1,
-      int u0,
-      int v0,
-      double yaw
-   ) {
-      // The chest renderer draws its model upright, unlike the skull/shulker ones BoxUv defaults to.
-      BoxUv.emit(mesh, texture, blockX, blockY, blockZ, x0, y0, z0, x1, y1, z1, u0, v0, 64, 64, yaw, 0.0, true);
    }
 }

@@ -1,9 +1,7 @@
 package com.norwood.meshify.export.special;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.norwood.meshify.export.MeshBuilder;
-import java.util.List;
-import net.minecraft.client.Minecraft;
+import com.norwood.meshify.export.BlockContext;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
 import net.minecraft.client.renderer.state.CameraRenderState;
@@ -17,8 +15,8 @@ public final class BlockEntityCaptureExporter {
    private BlockEntityCaptureExporter() {
    }
 
-   public static boolean export(MeshBuilder mesh, Minecraft client, BlockPos pos, BlockEntity blockEntity, double blockX, double blockY, double blockZ, List<String> warnings) {
-      BlockEntityRenderDispatcher dispatcher = client.getBlockEntityRenderDispatcher();
+   public static boolean export(BlockContext context, BlockEntity blockEntity) {
+      BlockEntityRenderDispatcher dispatcher = context.client().getBlockEntityRenderDispatcher();
 
       try {
          var renderer = dispatcher.getRenderer(blockEntity);
@@ -36,12 +34,13 @@ public final class BlockEntityCaptureExporter {
          }
 
          PoseStack matrices = new PoseStack();
-         matrices.translate(blockX, blockY, blockZ);
-         CaptureQueue queue = new CaptureQueue(mesh, client, warnings);
-         dispatcher.submit(state, matrices, queue, dummyCamera(pos));
+         Vec3 origin = context.origin();
+         matrices.translate(origin.x, origin.y, origin.z);
+         CaptureQueue queue = new CaptureQueue(context.mesh(), context.client(), context.warnings());
+         dispatcher.submit(state, matrices, queue, dummyCamera(context.pos()));
          return queue.capturedQuads > 0;
       } catch (Exception exception) {
-         warnings.add("BER capture failed @ " + pos.toShortString() + " (" + blockEntity.getType() + "): " + exception);
+         context.warnings().add("BER capture failed @ " + context.pos().toShortString() + " (" + blockEntity.getType() + "): " + exception);
          return false;
       }
    }

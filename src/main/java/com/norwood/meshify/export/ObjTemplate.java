@@ -12,8 +12,11 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
+import net.minecraft.world.phys.Vec3;
 
 public final class ObjTemplate {
+   // Templates are modelled around the block's centre, which sits half a block from its corner.
+   private static final double BLOCK_CENTRE = 0.5;
    private static final Map<String, ObjTemplate> CACHE = new ConcurrentHashMap<>();
    private final Map<String, List<ObjTemplate.Face>> groups = new LinkedHashMap<>();
 
@@ -72,13 +75,13 @@ public final class ObjTemplate {
 
       for (int k = 0; k < cornerCount; k++) {
          // v/vt/vn, 1-based, or negative to count back from the latest.
-         String[] refs = tokens[k + 1].split("/");
-         int v = Integer.parseInt(refs[0]);
-         corners[k] = positions.get(v > 0 ? v - 1 : positions.size() + v);
+         String[] indices = tokens[k + 1].split("/");
+         int positionIndex = Integer.parseInt(indices[0]);
+         corners[k] = positions.get(positionIndex > 0 ? positionIndex - 1 : positions.size() + positionIndex);
          uv[k] = new float[]{0.0F, 0.0F};
-         if (refs.length > 1 && !refs[1].isEmpty()) {
-            int vt = Integer.parseInt(refs[1]);
-            float[] texcoord = texcoords.get(vt > 0 ? vt - 1 : texcoords.size() + vt);
+         if (indices.length > 1 && !indices[1].isEmpty()) {
+            int texcoordIndex = Integer.parseInt(indices[1]);
+            float[] texcoord = texcoords.get(texcoordIndex > 0 ? texcoordIndex - 1 : texcoords.size() + texcoordIndex);
             // OBJ's V runs up from the bottom; the game's textures run down from the top.
             uv[k] = new float[]{texcoord[0], 1.0F - texcoord[1]};
          }
@@ -86,18 +89,23 @@ public final class ObjTemplate {
 
       List<ObjTemplate.Face> faces = this.groups.computeIfAbsent(group, k -> new ArrayList<>());
 
-      for (int a = 1; a + 1 < cornerCount; a += 2) {
-         int b = a + 1;
-         int c = a + 2 < cornerCount ? a + 2 : b;
-         faces.add(new ObjTemplate.Face(new float[][]{corners[0], corners[a], corners[b], corners[c]}, new float[][]{uv[0], uv[a], uv[b], uv[c]}, material));
+      for (int second = 1; second + 1 < cornerCount; second += 2) {
+         int third = second + 1;
+         int fourth = second + 2 < cornerCount ? second + 2 : third;
+         faces.add(
+            new ObjTemplate.Face(
+               new float[][]{corners[0], corners[second], corners[third], corners[fourth]}, new float[][]{uv[0], uv[second], uv[third], uv[fourth]}, material
+            )
+         );
       }
    }
 
-   // Emits group (or every group when null), turned yawDegrees about the block's centre; faces the resolver maps to null are dropped.
-   public void emit(MeshBuilder mesh, String group, BiFunction<String, float[], TextureKey> resolver, double blockX, double blockY, double blockZ, double yawDegrees) {
-      double yaw = Math.toRadians(yawDegrees);
+   // Emits group (or every group when null) where placement puts it; faces the resolver maps to null are dropped.
+   public void emit(Placement placement, String group, BiFunction<String, float[], TextureKey> resolver) {
+      double yaw = Math.toRadians(placement.yawDegrees());
       double cos = Math.cos(yaw);
       double sin = Math.sin(yaw);
+      Vec3 origin = placement.origin();
 
       for (Entry<String, List<ObjTemplate.Face>> entry : this.groups.entrySet()) {
          if (group != null && !entry.getKey().equals(group)) {
@@ -117,9 +125,9 @@ public final class ObjTemplate {
                double x = face.positions()[k][0];
                double y = face.positions()[k][1];
                double z = face.positions()[k][2];
-               positions[k][0] = (float)(blockX + 0.5 + x * cos - z * sin);
-               positions[k][1] = (float)(blockY + 0.5 + y);
-               positions[k][2] = (float)(blockZ + 0.5 + x * sin + z * cos);
+               positions[k][0] = (float)(origin.x + BLOCK_CENTRE + x * cos - z * sin);
+               positions[k][1] = (float)(origin.y + BLOCK_CENTRE + y);
+               positions[k][2] = (float)(origin.z + BLOCK_CENTRE + x * sin + z * cos);
             }
 
             float[][] uv = new float[4][2];
@@ -131,7 +139,7 @@ public final class ObjTemplate {
 
             float normalX = (float)(normal[0] * cos - normal[2] * sin);
             float normalZ = (float)(normal[0] * sin + normal[2] * cos);
-            mesh.addQuad(texture, positions, uv, new float[]{normalX, normal[1], normalZ});
+            placement.mesh().addQuad(texture, positions, uv, new float[]{normalX, normal[1], normalZ});
          }
       }
    }

@@ -37,7 +37,7 @@ public class MeshifyClient implements ClientModInitializer {
       ClientLifecycleEvents.CLIENT_STARTED.register(client -> Selection.loadSession(RegionExporter.exportRoot(client)));
       ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
          ClientCommandManager.literal("meshify")
-            .then(ClientCommandManager.literal("gui").executes(ctx -> openMenu(ctx.getSource().getClient())))
+            .then(ClientCommandManager.literal("gui").executes(context -> openMenu(context.getSource().getClient())))
             .then(cornerCommand("start", Corner.START))
             .then(cornerCommand("end", Corner.END))
             .then(ClientCommandManager.literal("here").executes(always(MeshifyActions::selectSingleBlock)))
@@ -49,22 +49,22 @@ public class MeshifyClient implements ClientModInitializer {
             .then(ClientCommandManager.literal("shrink").then(resizeArgument(-1)))
             .then(ClientCommandManager.literal("trim").executes(attempt(MeshifyActions::trim)))
             .then(ClientCommandManager.literal("clear").executes(always(MeshifyActions::clear)))
-            .then(ClientCommandManager.literal("status").executes(ctx -> {
-               ctx.getSource().sendFeedback(MeshifyActions.statusLine());
+            .then(ClientCommandManager.literal("status").executes(context -> {
+               context.getSource().sendFeedback(MeshifyActions.statusLine());
                return Command.SINGLE_SUCCESS;
             }))
             .then(ClientCommandManager.literal("cancel").executes(attempt(MeshifyActions::cancel)))
             .then(ClientCommandManager.literal("open").executes(always(MeshifyActions::openFolder)))
             .then(
                ClientCommandManager.literal("export")
-                  .executes(ctx -> export(ctx, null, null))
+                  .executes(context -> export(context, null, null))
                   .then(
                      ClientCommandManager.argument("name", StringArgumentType.word())
-                        .executes(ctx -> export(ctx, StringArgumentType.getString(ctx, "name"), null))
+                        .executes(context -> export(context, StringArgumentType.getString(context, "name"), null))
                         .then(
                            ClientCommandManager.argument("options", StringArgumentType.greedyString())
                               .suggests(MeshifyClient::suggestOptions)
-                              .executes(ctx -> export(ctx, StringArgumentType.getString(ctx, "name"), StringArgumentType.getString(ctx, "options")))
+                              .executes(context -> export(context, StringArgumentType.getString(context, "name"), StringArgumentType.getString(context, "options")))
                         )
                   )
             )
@@ -105,15 +105,15 @@ public class MeshifyClient implements ClientModInitializer {
 
    // A command that always goes through.
    private static Command<FabricClientCommandSource> always(Consumer<Feedback> action) {
-      return ctx -> {
-         action.accept(Feedback.of(ctx.getSource()));
+      return context -> {
+         action.accept(Feedback.of(context.getSource()));
          return Command.SINGLE_SUCCESS;
       };
    }
 
    // A command the action may refuse, reporting why.
    private static Command<FabricClientCommandSource> attempt(Predicate<Feedback> action) {
-      return ctx -> commandResult(action.test(Feedback.of(ctx.getSource())));
+      return context -> commandResult(action.test(Feedback.of(context.getSource())));
    }
 
    private static int openMenu(Minecraft client) {
@@ -122,19 +122,19 @@ public class MeshifyClient implements ClientModInitializer {
       return Command.SINGLE_SUCCESS;
    }
 
-   private static int export(CommandContext<FabricClientCommandSource> ctx, String name, String rawOptions) {
-      return commandResult(MeshifyActions.export(Feedback.of(ctx.getSource()), name, rawOptions));
+   private static int export(CommandContext<FabricClientCommandSource> context, String name, String rawOptions) {
+      return commandResult(MeshifyActions.export(Feedback.of(context.getSource()), name, rawOptions));
    }
 
    // <literal> sets the corner where the player stands, <literal> x y z sets it there.
    private static LiteralArgumentBuilder<FabricClientCommandSource> cornerCommand(String literal, Corner corner) {
       return ClientCommandManager.literal(literal)
-         .executes(ctx -> setCorner(ctx.getSource(), corner, ctx.getSource().getPlayer().blockPosition()))
+         .executes(context -> setCorner(context.getSource(), corner, context.getSource().getPlayer().blockPosition()))
          .then(
             ClientCommandManager.argument("x", IntegerArgumentType.integer())
                .then(
                   ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer()).executes(ctx -> setCorner(ctx.getSource(), corner, positionFromArguments(ctx))))
+                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer()).executes(context -> setCorner(context.getSource(), corner, positionFromArguments(context))))
                )
          );
    }
@@ -142,17 +142,17 @@ public class MeshifyClient implements ClientModInitializer {
    // <blocks> [side], shared by expand (sign 1) and shrink (sign -1).
    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> resizeArgument(int sign) {
       return ClientCommandManager.argument("blocks", IntegerArgumentType.integer(1))
-         .executes(ctx -> resize(ctx, sign, null))
+         .executes(context -> resize(context, sign, null))
          .then(
             ClientCommandManager.argument("side", StringArgumentType.word())
-               .suggests((ctx, builder) -> suggestMatching(MeshifyActions.SIDES, builder))
-               .executes(ctx -> resize(ctx, sign, StringArgumentType.getString(ctx, "side")))
+               .suggests((context, builder) -> suggestMatching(MeshifyActions.SIDES, builder))
+               .executes(context -> resize(context, sign, StringArgumentType.getString(context, "side")))
          );
    }
 
-   private static int resize(CommandContext<FabricClientCommandSource> ctx, int sign, String side) {
-      int blocks = sign * IntegerArgumentType.getInteger(ctx, "blocks");
-      return commandResult(MeshifyActions.resize(Feedback.of(ctx.getSource()), blocks, side));
+   private static int resize(CommandContext<FabricClientCommandSource> context, int sign, String side) {
+      int blocks = sign * IntegerArgumentType.getInteger(context, "blocks");
+      return commandResult(MeshifyActions.resize(Feedback.of(context.getSource()), blocks, side));
    }
 
    private static CompletableFuture<Suggestions> suggestMatching(List<String> candidates, SuggestionsBuilder builder) {
@@ -167,7 +167,7 @@ public class MeshifyClient implements ClientModInitializer {
       return builder.buildFuture();
    }
 
-   private static CompletableFuture<Suggestions> suggestOptions(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder builder) {
+   private static CompletableFuture<Suggestions> suggestOptions(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
       String typed = builder.getRemaining();
       int lastSpace = typed.lastIndexOf(' ');
       SuggestionsBuilder lastWord = lastSpace < 0 ? builder : builder.createOffset(builder.getStart() + lastSpace + 1);
@@ -183,8 +183,8 @@ public class MeshifyClient implements ClientModInitializer {
       return lastWord.buildFuture();
    }
 
-   private static BlockPos positionFromArguments(CommandContext<FabricClientCommandSource> ctx) {
-      return new BlockPos(IntegerArgumentType.getInteger(ctx, "x"), IntegerArgumentType.getInteger(ctx, "y"), IntegerArgumentType.getInteger(ctx, "z"));
+   private static BlockPos positionFromArguments(CommandContext<FabricClientCommandSource> context) {
+      return new BlockPos(IntegerArgumentType.getInteger(context, "x"), IntegerArgumentType.getInteger(context, "y"), IntegerArgumentType.getInteger(context, "z"));
    }
 
    private static int setCorner(FabricClientCommandSource source, Corner corner, BlockPos pos) {

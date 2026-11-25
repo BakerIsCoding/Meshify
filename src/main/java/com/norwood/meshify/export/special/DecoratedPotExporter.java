@@ -1,15 +1,12 @@
 package com.norwood.meshify.export.special;
 
-import com.norwood.meshify.export.MeshBuilder;
+import com.norwood.meshify.export.BlockContext;
 import com.norwood.meshify.export.ObjTemplate;
 import com.norwood.meshify.export.TextureKey;
 import java.io.IOException;
-import java.util.List;
 import java.util.Optional;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.entity.DecoratedPotBlockEntity;
 import net.minecraft.world.level.block.entity.DecoratedPotPattern;
 import net.minecraft.world.level.block.entity.PotDecorations;
@@ -19,6 +16,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStackTemplate;
 *///?} else {
 import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
@@ -33,24 +31,25 @@ public final class DecoratedPotExporter {
    private DecoratedPotExporter() {
    }
 
-   public static boolean export(MeshBuilder mesh, BlockGetter world, BlockPos pos, BlockState state, double blockX, double blockY, double blockZ, List<String> warnings) {
+   public static boolean export(BlockContext context) {
       ObjTemplate template;
       try {
          template = ObjTemplate.getOrLoad("decorated_pot.obj");
       } catch (IOException exception) {
-         warnings.add("decorated pot template failed: " + exception.getMessage());
+         context.warnings().add("decorated pot template failed: " + exception.getMessage());
          return false;
       }
 
+      BlockState state = context.state();
       Direction facing = state.hasProperty(BlockStateProperties.HORIZONTAL_FACING) ? state.getValue(BlockStateProperties.HORIZONTAL_FACING) : Direction.NORTH;
-      PotDecorations sherds = world.getBlockEntity(pos) instanceof DecoratedPotBlockEntity pot ? pot.getDecorations() : PotDecorations.EMPTY;
+      PotDecorations sherds = context.world().getBlockEntity(context.pos()) instanceof DecoratedPotBlockEntity pot ? pot.getDecorations() : PotDecorations.EMPTY;
       TextureKey base = potTexture("decorated_pot_base");
       TextureKey front = sherdTexture(sherds.front());
       TextureKey back = sherdTexture(sherds.back());
       TextureKey left = sherdTexture(sherds.left());
       TextureKey right = sherdTexture(sherds.right());
       // Which side a face is on, read from its normal in the template's own, unturned frame.
-      template.emit(mesh, null, (material, normal) -> {
+      template.emit(context.placement(Yaw.of(facing)), null, (material, normal) -> {
          if (!material.contains(PLAIN_SIDE)) {
             return base;
          } else if (Math.abs(normal[0]) >= Math.abs(normal[2])) {
@@ -58,7 +57,7 @@ public final class DecoratedPotExporter {
          } else {
             return normal[2] > 0.0F ? back : front;
          }
-      }, blockX, blockY, blockZ, Yaw.of(facing));
+      });
       return true;
    }
 

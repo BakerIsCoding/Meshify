@@ -85,6 +85,8 @@ import org.joml.Vector4f;
 // Stands in for the game's render queue, so block-entity and entity renderers draw into the mesh instead.
 final class CaptureQueue implements SubmitNodeCollector {
    private static final int MAP_SIZE = 128;
+   // A smaller span means the corners share one U or V, leaving nothing to stretch the map across.
+   private static final float MIN_UV_SPAN = 1.0E-6F;
    private final MeshBuilder mesh;
    private final Minecraft client;
    private final List<String> warnings;
@@ -227,7 +229,7 @@ final class CaptureQueue implements SubmitNodeCollector {
             float span = max - min;
 
             for (float[] corner : uv) {
-               corner[axis] = span > 1.0E-6F ? (corner[axis] - min) / span : 0.0F;
+               corner[axis] = span > MIN_UV_SPAN ? (corner[axis] - min) / span : 0.0F;
             }
          }
 
@@ -351,6 +353,9 @@ final class CaptureQueue implements SubmitNodeCollector {
       }
    }
    *///?} else {
+   // A fixed seed, so a model with random variants comes out the same every export.
+   private static final long VARIANT_SEED = 42L;
+
    @Override
    public void submitBlockModel(
       PoseStack matrices, RenderType renderLayer, BlockStateModel model, float r, float g, float b, int light, int overlay, int outlineColor
@@ -365,8 +370,7 @@ final class CaptureQueue implements SubmitNodeCollector {
    }
 
    private void emitBakedModel(PoseStack matrices, BlockStateModel model, int tint) {
-      // A fixed seed, so a model with random variants comes out the same every export.
-      for (BlockModelPart part : model.collectParts(RandomSource.create(42L))) {
+      for (BlockModelPart part : model.collectParts(RandomSource.create(VARIANT_SEED))) {
          for (Direction face : RegionExporter.QUAD_FACES) {
             for (BakedQuad quad : part.getQuads(face)) {
                this.emitBakedQuad(matrices, quad, tint);

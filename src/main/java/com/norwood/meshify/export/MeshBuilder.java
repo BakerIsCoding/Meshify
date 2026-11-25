@@ -16,6 +16,7 @@ public final class MeshBuilder {
    private static final int WELD_GRID = 1024;
    private static final float WELD_STEP = 1.0F / WELD_GRID;
    private static final double DEGENERATE_AREA = 1.0E-8;
+   private static final float DEGENERATE_NORMAL_LENGTH = 1.0E-8F;
    private final Map<String, TextureKey> textures = new LinkedHashMap<>();
    private final Map<String, List<MeshBuilder.Quad>> quads = new LinkedHashMap<>();
    private final Set<String> emissiveTextureIds = new LinkedHashSet<>();
@@ -45,8 +46,8 @@ public final class MeshBuilder {
    public int faceCount() {
       int count = 0;
 
-      for (List<MeshBuilder.Quad> list : this.quads.values()) {
-         count += list.size();
+      for (List<MeshBuilder.Quad> group : this.quads.values()) {
+         count += group.size();
       }
 
       return count;
@@ -59,11 +60,11 @@ public final class MeshBuilder {
 
       while (iterator.hasNext()) {
          Entry<String, List<MeshBuilder.Quad>> entry = iterator.next();
-         List<MeshBuilder.Quad> list = entry.getValue();
-         List<MeshBuilder.Quad> kept = new ArrayList<>(list.size());
-         Set<String> seen = new HashSet<>(list.size() * 2);
+         List<MeshBuilder.Quad> group = entry.getValue();
+         List<MeshBuilder.Quad> kept = new ArrayList<>(group.size());
+         Set<String> seen = new HashSet<>(group.size() * 2);
 
-         for (MeshBuilder.Quad quad : list) {
+         for (MeshBuilder.Quad quad : group) {
             snap(quad.positions());
             if (quadArea(quad.positions()) < DEGENERATE_AREA) {
                degenerate++;
@@ -87,17 +88,17 @@ public final class MeshBuilder {
 
    // Unit normal of the plane through a face's first three corners; straight up when they are collinear.
    public static float[] faceNormal(float[][] corners) {
-      float ax = corners[1][0] - corners[0][0];
-      float ay = corners[1][1] - corners[0][1];
-      float az = corners[1][2] - corners[0][2];
-      float bx = corners[2][0] - corners[0][0];
-      float by = corners[2][1] - corners[0][1];
-      float bz = corners[2][2] - corners[0][2];
-      float nx = ay * bz - az * by;
-      float ny = az * bx - ax * bz;
-      float nz = ax * by - ay * bx;
-      float length = (float)Math.sqrt(nx * nx + ny * ny + nz * nz);
-      return length < 1.0E-8F ? new float[]{0.0F, 1.0F, 0.0F} : new float[]{nx / length, ny / length, nz / length};
+      float abX = corners[1][0] - corners[0][0];
+      float abY = corners[1][1] - corners[0][1];
+      float abZ = corners[1][2] - corners[0][2];
+      float acX = corners[2][0] - corners[0][0];
+      float acY = corners[2][1] - corners[0][1];
+      float acZ = corners[2][2] - corners[0][2];
+      float normalX = abY * acZ - abZ * acY;
+      float normalY = abZ * acX - abX * acZ;
+      float normalZ = abX * acY - abY * acX;
+      float length = (float)Math.sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ);
+      return length < DEGENERATE_NORMAL_LENGTH ? new float[]{0.0F, 1.0F, 0.0F} : new float[]{normalX / length, normalY / length, normalZ / length};
    }
 
    private static void snap(float[][] positions) {

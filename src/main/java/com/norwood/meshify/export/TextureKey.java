@@ -101,7 +101,12 @@ public abstract class TextureKey {
       return generated(id, supplier, false);
    }
 
-   public static TextureKey generated(String id, TextureKey.ImageSupplier supplier, boolean preScaled) {
+   // Kept at its generated size whatever the texture scale, for images that set their own resolution like the bake sheets.
+   public static TextureKey generatedPreScaled(String id, TextureKey.ImageSupplier supplier) {
+      return generated(id, supplier, true);
+   }
+
+   private static TextureKey generated(String id, TextureKey.ImageSupplier supplier, boolean preScaled) {
       return new TextureKey(id, preScaled) {
          @Override
          public NativeImage load(Minecraft client) throws IOException {
@@ -123,18 +128,18 @@ public abstract class TextureKey {
       }
    }
 
-   // Copies the top-left width x height of src, multiplied by tint.
-   static NativeImage copyRegion(NativeImage src, int width, int height, int tint) {
+   // Copies the top-left width x height of source, multiplied by tint.
+   static NativeImage copyRegion(NativeImage source, int width, int height, int tint) {
       float[] factor = tintFactors(tint);
       NativeImage copy = new NativeImage(width, height, false);
 
       for (int row = 0; row < height; row++) {
-         for (int col = 0; col < width; col++) {
-            int argb = src.getPixel(col, row);
+         for (int column = 0; column < width; column++) {
+            int argb = source.getPixel(column, row);
             int red = (int)((argb >> 16 & 0xFF) * factor[0]);
             int green = (int)((argb >> 8 & 0xFF) * factor[1]);
             int blue = (int)((argb & 0xFF) * factor[2]);
-            copy.setPixel(col, row, argb & 0xFF000000 | red << 16 | green << 8 | blue);
+            copy.setPixel(column, row, argb & 0xFF000000 | red << 16 | green << 8 | blue);
          }
       }
 
@@ -181,27 +186,27 @@ public abstract class TextureKey {
          return result;
       }
 
-      // Draws src, tinted, over dst with ordinary alpha blending.
-      private static void blend(NativeImage dst, NativeImage src, int tint) {
+      // Draws overlay, tinted, over target with ordinary alpha blending.
+      private static void blend(NativeImage target, NativeImage overlay, int tint) {
          float[] factor = tintFactors(tint);
-         int width = Math.min(dst.getWidth(), src.getWidth());
-         int height = Math.min(dst.getHeight(), src.getHeight());
+         int width = Math.min(target.getWidth(), overlay.getWidth());
+         int height = Math.min(target.getHeight(), overlay.getHeight());
 
          for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-               int top = src.getPixel(x, y);
+               int top = overlay.getPixel(x, y);
                int topAlpha = top >>> 24;
                if (topAlpha == 0) {
                   continue;
                }
 
                float opacity = topAlpha / 255.0F;
-               int bottom = dst.getPixel(x, y);
+               int bottom = target.getPixel(x, y);
                int red = (int)((top >> 16 & 0xFF) * factor[0] * opacity + (bottom >> 16 & 0xFF) * (1.0F - opacity));
                int green = (int)((top >> 8 & 0xFF) * factor[1] * opacity + (bottom >> 8 & 0xFF) * (1.0F - opacity));
                int blue = (int)((top & 0xFF) * factor[2] * opacity + (bottom & 0xFF) * (1.0F - opacity));
                int alpha = Math.min(255, (int)(topAlpha + (bottom >>> 24) * (1.0F - opacity)));
-               dst.setPixel(x, y, alpha << 24 | red << 16 | green << 8 | blue);
+               target.setPixel(x, y, alpha << 24 | red << 16 | green << 8 | blue);
             }
          }
       }
@@ -276,12 +281,12 @@ public abstract class TextureKey {
       }
 
       // Pads a pre-1.8 64x32 skin to the square layout the head UVs assume.
-      private static NativeImage expandLegacy(NativeImage src) {
+      private static NativeImage expandLegacy(NativeImage legacySkin) {
          NativeImage expanded = new NativeImage(SKIN_SIZE, SKIN_SIZE, false);
 
          for (int y = 0; y < SKIN_SIZE; y++) {
             for (int x = 0; x < SKIN_SIZE; x++) {
-               expanded.setPixel(x, y, y < LEGACY_SKIN_HEIGHT ? src.getPixel(x, y) : 0);
+               expanded.setPixel(x, y, y < LEGACY_SKIN_HEIGHT ? legacySkin.getPixel(x, y) : 0);
             }
          }
 

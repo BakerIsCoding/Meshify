@@ -104,46 +104,46 @@ public final class Selection {
 
    // Grows all six sides by that many blocks; a negative count shrinks them.
    public static void expand(int blocks) {
-      BlockPos lo = min();
-      BlockPos hi = max();
-      int[] x = growRange(lo.getX(), hi.getX(), blocks);
-      int[] y = growRange(lo.getY(), hi.getY(), blocks);
-      int[] z = growRange(lo.getZ(), hi.getZ(), blocks);
+      BlockPos min = min();
+      BlockPos max = max();
+      int[] x = growRange(min.getX(), max.getX(), blocks);
+      int[] y = growRange(min.getY(), max.getY(), blocks);
+      int[] z = growRange(min.getZ(), max.getZ(), blocks);
       setBounds(new BlockPos(x[0], y[0], z[0]), new BlockPos(x[1], y[1], z[1]));
    }
 
    // Moves only the side face; shrinking stops at the opposite face so it never turns inside out.
    public static void expand(int blocks, Direction side) {
-      BlockPos lo = min();
-      BlockPos hi = max();
+      BlockPos min = min();
+      BlockPos max = max();
       Direction.Axis axis = side.getAxis();
-      int shift = Math.max(blocks, lo.get(axis) - hi.get(axis));
+      int shift = Math.max(blocks, min.get(axis) - max.get(axis));
       if (side.getAxisDirection() == Direction.AxisDirection.POSITIVE) {
-         setBounds(lo, hi.relative(side, shift));
+         setBounds(min, max.relative(side, shift));
       } else {
-         setBounds(lo.relative(side, shift), hi);
+         setBounds(min.relative(side, shift), max);
       }
    }
 
    // Shrinking past the middle would flip the axis, so it collapses to a single block instead.
-   private static int[] growRange(int lo, int hi, int blocks) {
-      int grownLo = lo - blocks;
-      int grownHi = hi + blocks;
-      if (grownLo > grownHi) {
-         int middle = (lo + hi) / 2;
+   private static int[] growRange(int min, int max, int blocks) {
+      int grownMin = min - blocks;
+      int grownMax = max + blocks;
+      if (grownMin > grownMax) {
+         int middle = (min + max) / 2;
          return new int[]{middle, middle};
       }
 
-      return new int[]{grownLo, grownHi};
+      return new int[]{grownMin, grownMax};
    }
 
    public static void expandVertical(int bottomY, int topY) {
       setBounds(new BlockPos(min().getX(), bottomY, min().getZ()), new BlockPos(max().getX(), topY, max().getZ()));
    }
 
-   public static void setBounds(BlockPos lo, BlockPos hi) {
-      start = lo;
-      end = hi;
+   public static void setBounds(BlockPos min, BlockPos max) {
+      start = min;
+      end = max;
       save();
    }
 
@@ -152,7 +152,7 @@ public final class Selection {
       save();
    }
 
-   // Keeps the selection across restarts in a Properties file: five fields need no JSON.
+   // Keeps the selection across restarts in a Properties file, which is plenty for four values.
    public static void loadSession(Path exportRoot) {
       sessionFile = exportRoot.resolve("session.properties");
       if (!Files.exists(sessionFile)) {

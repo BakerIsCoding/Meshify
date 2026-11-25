@@ -1,13 +1,14 @@
 package com.norwood.meshify.export.special;
 
+import com.norwood.meshify.export.BlockContext;
 import com.norwood.meshify.export.BoxUv;
-import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.TextureKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 
 public final class BedExporter {
    // Per face, four corners of {x, y, z, u, v} in model and texture pixels.
@@ -35,10 +36,12 @@ public final class BedExporter {
    private BedExporter() {
    }
 
-   public static void export(MeshBuilder mesh, BlockState state, BedBlock bed, double blockX, double blockY, double blockZ) {
+   public static void export(BlockContext context, BedBlock bed) {
+      BlockState state = context.state();
       double yaw = Yaw.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
       boolean isHead = state.getValue(BedBlock.PART) == BedPart.HEAD;
       TextureKey texture = TextureKey.resource(Identifier.withDefaultNamespace("textures/entity/bed/" + bed.getColor().getName() + ".png"));
+      BoxUv bedHalf = new BoxUv(context.placement(yaw), texture, 64, 64);
       double[][][] quads = isHead ? HEAD_QUADS : FOOT_QUADS;
       float[][] normals = isHead ? HEAD_NORMALS : FOOT_NORMALS;
 
@@ -52,16 +55,16 @@ public final class BedExporter {
             uvs[k] = new double[]{corner[3], corner[4]};
          }
 
-         BoxUv.rotatedQuad(mesh, texture, blockX, blockY, blockZ, corners, uvs, 64, 64, yaw, normals[face]);
+         bedHalf.quad(corners, uvs, normals[face]);
       }
 
       // The legs.
       if (isHead) {
-         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, 0.0, 0.0, 0.0, 3.0, 3.0, 3.0, 50, 0, 64, 64, yaw, 0.0);
-         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, 13.0, 0.0, 0.0, 16.0, 3.0, 3.0, 50, 6, 64, 64, yaw, 0.0);
+         bedHalf.box(new AABB(0.0, 0.0, 0.0, 3.0, 3.0, 3.0), 50, 0);
+         bedHalf.box(new AABB(13.0, 0.0, 0.0, 16.0, 3.0, 3.0), 50, 6);
       } else {
-         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, 0.0, 0.0, 13.0, 3.0, 3.0, 16.0, 50, 12, 64, 64, yaw, 0.0);
-         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, 13.0, 0.0, 13.0, 16.0, 3.0, 16.0, 50, 18, 64, 64, yaw, 0.0);
+         bedHalf.box(new AABB(0.0, 0.0, 13.0, 3.0, 3.0, 16.0), 50, 12);
+         bedHalf.box(new AABB(13.0, 0.0, 13.0, 16.0, 3.0, 16.0), 50, 18);
       }
    }
 }

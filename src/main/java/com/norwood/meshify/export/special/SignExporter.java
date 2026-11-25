@@ -1,9 +1,10 @@
 package com.norwood.meshify.export.special;
 
+import com.norwood.meshify.export.BlockContext;
 import com.norwood.meshify.export.BoxUv;
 import com.norwood.meshify.export.FontRaster;
-import com.norwood.meshify.export.MeshBuilder;
 import com.norwood.meshify.export.ObjTemplate;
+import com.norwood.meshify.export.Placement;
 import com.norwood.meshify.export.TextureKey;
 import java.io.IOException;
 import java.util.List;
@@ -12,11 +13,9 @@ import java.util.function.BiFunction;
 import net.minecraft.client.Minecraft;
 //? if >=26.4
 //import net.minecraft.client.renderer.blockentity.AbstractSignRenderer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.CeilingHangingSignBlock;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.StandingSignBlock;
@@ -28,6 +27,7 @@ import net.minecraft.world.level.block.entity.SignText;
 //import net.minecraft.world.level.block.entity.SignTextSlot;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 
 public final class SignExporter {
    // Four lines of the game's sign font. The text quads are all twice as wide as they are tall.
@@ -43,40 +43,32 @@ public final class SignExporter {
    private SignExporter() {
    }
 
-   public static boolean export(
-      MeshBuilder mesh,
-      Minecraft client,
-      BlockGetter world,
-      BlockPos pos,
-      BlockState state,
-      SignBlock block,
-      double blockX,
-      double blockY,
-      double blockZ,
-      List<String> warnings
-   ) {
-      boolean hanging = block instanceof CeilingHangingSignBlock || block instanceof WallHangingSignBlock;
-      if (!hanging && !(block instanceof StandingSignBlock) && !(block instanceof WallSignBlock)) {
+   public static boolean export(BlockContext context, SignBlock block) {
+      if (!isHanging(block) && !(block instanceof StandingSignBlock) && !(block instanceof WallSignBlock)) {
          return false;
       }
 
-      double yaw = yaw(state, block);
+      double yaw = yaw(context.state(), block);
       // From 26.2 the sign itself is a block model, which the caller exports; only the text is drawn here.
       //? if <26.2 {
-      if (!emitBody(mesh, client, pos, state, block, hanging, yaw, blockX, blockY, blockZ, warnings)) {
+      if (!emitBody(context, block, yaw)) {
          return false;
       }
       //?}
 
       if (block instanceof StandingSignBlock) {
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, STANDING_TEXT);
+         emitTexts(context, yaw, STANDING_TEXT);
       } else if (block instanceof WallSignBlock) {
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, WALL_TEXT);
+         emitTexts(context, yaw, WALL_TEXT);
       } else {
-         emitTexts(mesh, client, world, pos, blockX, blockY, blockZ, yaw, warnings, HANGING_TEXT);
+         emitTexts(context, yaw, HANGING_TEXT);
       }
 
       return true;
+   }
+
+   private static boolean isHanging(SignBlock block) {
+      return block instanceof CeilingHangingSignBlock || block instanceof WallHangingSignBlock;
    }
 
    private static double yaw(BlockState state, SignBlock block) {
@@ -92,70 +84,53 @@ public final class SignExporter {
    }
 
    // The sign without its text, built from the sign texture the renderer draws before 26.2; false when that fails.
-   private static boolean emitBody(
-      MeshBuilder mesh,
-      Minecraft client,
-      BlockPos pos,
-      BlockState state,
-      SignBlock block,
-      boolean hanging,
-      double yaw,
-      double blockX,
-      double blockY,
-      double blockZ,
-      List<String> warnings
-   ) {
+   private static boolean emitBody(BlockContext context, SignBlock block, double yaw) {
       String wood = TextureKey.sanitize(block.type().name());
-      Identifier texturePath = Identifier.withDefaultNamespace("textures/entity/signs/" + (hanging ? "hanging/" : "") + wood + ".png");
-      if (client.getResourceManager().getResource(texturePath).isEmpty()) {
-         warnings.add("sign texture not found, skipped: " + texturePath + " @ " + pos.toShortString());
+      Identifier texturePath = Identifier.withDefaultNamespace("textures/entity/signs/" + (isHanging(block) ? "hanging/" : "") + wood + ".png");
+      if (context.client().getResourceManager().getResource(texturePath).isEmpty()) {
+         context.warnings().add("sign texture not found, skipped: " + texturePath + " @ " + context.pos().toShortString());
          return false;
       }
 
       TextureKey texture = TextureKey.resource(texturePath);
       // The standing and wall signs are the sign model's cuboids at the 2/3 scale its renderer draws them.
       if (block instanceof StandingSignBlock) {
+         BoxUv sign = new BoxUv(context.placement(yaw), texture, 64, 32);
          // Post, board.
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            7.333333333333333, 0.0, 7.333333333333333, 8.666666666666666, 9.333333333333334, 8.666666666666666,
-            0, 14, 2, 14, 2, 64, 32, yaw, 0.0, Direction.UP, false
+         sign.box(
+            new AABB(7.333333333333333, 0.0, 7.333333333333333, 8.666666666666666, 9.333333333333334, 8.666666666666666), 0, 14, new Vec3i(2, 14, 2)
          );
-         BoxUv.emit(
-            mesh, texture, blockX, blockY, blockZ,
-            0.0, 9.333333333333334, 7.333333333333333, 16.0, 17.333333333333332, 8.666666666666666,
-            0, 0, 24, 12, 2, 64, 32, yaw, 0.0, Direction.UP, false
-         );
+         sign.box(new AABB(0.0, 9.333333333333334, 7.333333333333333, 16.0, 17.333333333333332, 8.666666666666666), 0, 0, new Vec3i(24, 12, 2));
       } else if (block instanceof WallSignBlock) {
-         BoxUv.emit(mesh, texture, blockX, blockY, blockZ, 0.0, 4.0, 14.666666666666666, 16.0, 12.0, 16.0, 0, 0, 24, 12, 2, 64, 32, yaw, 0.0, Direction.UP, false);
+         new BoxUv(context.placement(yaw), texture, 64, 32).box(new AABB(0.0, 4.0, 14.666666666666666, 16.0, 12.0, 16.0), 0, 0, new Vec3i(24, 12, 2));
       } else {
          ObjTemplate template;
          try {
             template = ObjTemplate.getOrLoad("hanging_sign.obj");
          } catch (IOException exception) {
-            warnings.add("hanging sign template failed: " + exception.getMessage());
+            context.warnings().add("hanging sign template failed: " + exception.getMessage());
             return false;
          }
 
+         Placement placement = context.placement(yaw);
          BiFunction<String, float[], TextureKey> wholeTexture = (material, normal) -> texture;
          if (block instanceof WallHangingSignBlock) {
-            template.emit(mesh, "sign", wholeTexture, blockX, blockY, blockZ, yaw);
-            template.emit(mesh, "chains", wholeTexture, blockX, blockY, blockZ, yaw);
-            template.emit(mesh, "top_bar", wholeTexture, blockX, blockY, blockZ, yaw);
+            template.emit(placement, "sign", wholeTexture);
+            template.emit(placement, "chains", wholeTexture);
+            template.emit(placement, "top_bar", wholeTexture);
          } else {
+            BlockState state = context.state();
             boolean attached = state.hasProperty(CeilingHangingSignBlock.ATTACHED) && state.getValue(CeilingHangingSignBlock.ATTACHED);
-            template.emit(mesh, "sign", wholeTexture, blockX, blockY, blockZ, yaw);
-            template.emit(mesh, attached ? "chains_attached" : "chains", wholeTexture, blockX, blockY, blockZ, yaw);
+            template.emit(placement, "sign", wholeTexture);
+            template.emit(placement, attached ? "chains_attached" : "chains", wholeTexture);
          }
       }
 
       return true;
    }
 
-   private static void emitTexts(
-      MeshBuilder mesh, Minecraft client, BlockGetter world, BlockPos pos, double blockX, double blockY, double blockZ, double yaw, List<String> warnings, TextArea area
-   ) {
-      if (!(world.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
+   private static void emitTexts(BlockContext context, double yaw, TextArea area) {
+      if (!(context.world().getBlockEntity(context.pos()) instanceof SignBlockEntity sign)) {
          return;
       }
 
@@ -170,18 +145,18 @@ public final class SignExporter {
       double x1 = area.x1();
       double y0 = area.y0();
       double y1 = area.y1();
-      TextureKey front = textTexture(client, frontText, warnings);
+      TextureKey front = textTexture(context.client(), frontText, context.warnings());
       if (front != null) {
          double zFront = area.zFront();
          double[][] corners = {{x1, y0, zFront}, {x0, y0, zFront}, {x0, y1, zFront}, {x1, y1, zFront}};
-         BoxUv.rotatedQuad(mesh, front, blockX, blockY, blockZ, corners, TEXT_UV, TEXT_WIDTH, TEXT_HEIGHT, yaw, new float[]{0.0F, 0.0F, -1.0F});
+         new BoxUv(context.placement(yaw), front, TEXT_WIDTH, TEXT_HEIGHT).quad(corners, TEXT_UV, new float[]{0.0F, 0.0F, -1.0F});
       }
 
       double zBack = area.zBack();
-      TextureKey back = Double.isNaN(zBack) ? null : textTexture(client, backText, warnings);
+      TextureKey back = Double.isNaN(zBack) ? null : textTexture(context.client(), backText, context.warnings());
       if (back != null) {
          double[][] corners = {{x0, y0, zBack}, {x1, y0, zBack}, {x1, y1, zBack}, {x0, y1, zBack}};
-         BoxUv.rotatedQuad(mesh, back, blockX, blockY, blockZ, corners, TEXT_UV, TEXT_WIDTH, TEXT_HEIGHT, yaw, new float[]{0.0F, 0.0F, 1.0F});
+         new BoxUv(context.placement(yaw), back, TEXT_WIDTH, TEXT_HEIGHT).quad(corners, TEXT_UV, new float[]{0.0F, 0.0F, 1.0F});
       }
    }
 

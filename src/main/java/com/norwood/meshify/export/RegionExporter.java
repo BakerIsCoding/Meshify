@@ -58,7 +58,6 @@ import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
-import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3fc;
 
@@ -323,55 +322,52 @@ public final class RegionExporter {
             return false;
          }
 
-         double blockX = pos.getX() - this.min.getX();
-         double blockY = pos.getY() - this.min.getY();
-         double blockZ = pos.getZ() - this.min.getZ();
+         BlockContext blockContext = new BlockContext(this.client, this.world, pos, state, this.mesh, this.meshCorner(pos), this.warnings);
          boolean exported = false;
-         FluidState fluid = state.getFluidState();
-         if (!fluid.isEmpty()) {
-            FluidExporter.export(this.mesh, this.world, pos, fluid, this.bounds, blockX, blockY, blockZ);
+         if (!state.getFluidState().isEmpty()) {
+            FluidExporter.export(blockContext, this.bounds);
             exported = true;
          }
 
          Block block = state.getBlock();
          if (block instanceof AbstractSkullBlock skull) {
-            exported |= SkullExporter.export(this.mesh, this.world, pos, state, skull, blockX, blockY, blockZ, this.warnings);
+            exported |= SkullExporter.export(blockContext, skull);
          } else if (block instanceof ChestBlock || block instanceof EnderChestBlock) {
-            ChestExporter.export(this.mesh, state, blockX, blockY, blockZ);
+            ChestExporter.export(blockContext);
             exported = true;
          } else if (block instanceof SignBlock sign) {
-            exported |= SignExporter.export(this.mesh, this.client, this.world, pos, state, sign, blockX, blockY, blockZ, this.warnings);
+            exported |= SignExporter.export(blockContext, sign);
             // From 26.2 the sign board is a block model, and its renderer only draws the text.
             //? if >=26.2
             //exported |= this.exportModelBlock(state, pos);
          // From 26.2 beds are plain block models, exported below like any other block.
          //? if <26.2 {
          } else if (block instanceof BedBlock bed) {
-            BedExporter.export(this.mesh, state, bed, blockX, blockY, blockZ);
+            BedExporter.export(blockContext, bed);
             exported = true;
          //?}
          } else if (block instanceof ShulkerBoxBlock shulkerBox) {
-            ShulkerExporter.export(this.mesh, state, shulkerBox, blockX, blockY, blockZ);
+            ShulkerExporter.export(blockContext, shulkerBox);
             exported = true;
          } else if (block instanceof AbstractBannerBlock banner) {
-            BannerExporter.export(this.mesh, this.world, pos, state, banner, blockX, blockY, blockZ);
+            BannerExporter.export(blockContext, banner);
             exported = true;
          } else if (block instanceof DecoratedPotBlock) {
-            exported |= DecoratedPotExporter.export(this.mesh, this.world, pos, state, blockX, blockY, blockZ, this.warnings);
+            exported |= DecoratedPotExporter.export(blockContext);
          } else {
             boolean rendererCaptured = false;
             BlockEntity blockEntity = this.world.getBlockEntity(pos);
             if (blockEntity != null) {
-               rendererCaptured = BlockEntityCaptureExporter.export(this.mesh, this.client, pos, blockEntity, blockX, blockY, blockZ, this.warnings);
+               rendererCaptured = BlockEntityCaptureExporter.export(blockContext, blockEntity);
                exported |= rendererCaptured;
             }
 
             if (!rendererCaptured) {
                if (block instanceof BellBlock) {
-                  BellExporter.export(this.mesh, blockX, blockY, blockZ);
+                  BellExporter.export(blockContext);
                   exported = true;
                } else if (block instanceof ConduitBlock) {
-                  ConduitExporter.export(this.mesh, blockX, blockY, blockZ);
+                  ConduitExporter.export(blockContext);
                   exported = true;
                }
             }
@@ -399,8 +395,7 @@ public final class RegionExporter {
             return false;
          }
 
-         BlockPos local = pos.subtract(this.min);
-         QuadContext context = new QuadContext(state, pos, state.getOffset(pos), local.getX(), local.getY(), local.getZ(), state.getLightEmission() > 0);
+         QuadContext context = new QuadContext(state, pos, this.meshCorner(pos), state.getOffset(pos), state.getLightEmission() > 0);
          boolean hasQuads = false;
 
          //? if >=26.1 {
@@ -425,6 +420,11 @@ public final class RegionExporter {
          }
 
          return hasQuads;
+      }
+
+      // Where the block's lowest corner lands in the mesh, whose origin is the region's lowest corner.
+      private Vec3 meshCorner(BlockPos pos) {
+         return new Vec3(pos.getX() - this.min.getX(), pos.getY() - this.min.getY(), pos.getZ() - this.min.getZ());
       }
 
       // Faces on the region boundary always stay, so the cut edge of a build is not left open.
@@ -455,14 +455,14 @@ public final class RegionExporter {
 
          for (int k = 0; k < 4; k++) {
             Vector3fc vertex = BakedQuads.position(quad, k);
-            positions[k][0] = (float)(context.blockX() + vertex.x() + context.offset().x);
-            positions[k][1] = (float)(context.blockY() + vertex.y() + context.offset().y);
-            positions[k][2] = (float)(context.blockZ() + vertex.z() + context.offset().z);
+            positions[k][0] = (float)(context.origin().x + vertex.x() + context.offset().x);
+            positions[k][1] = (float)(context.origin().y + vertex.y() + context.offset().y);
+            positions[k][2] = (float)(context.origin().z + vertex.z() + context.offset().z);
             uvs[k] = BakedQuads.spriteUv(quad, sprite, k);
          }
 
          TextureKey texture = TextureKey.sprite(sprite, tint);
-         if (this.baker != null && face != null && this.baker.tryAdd(context.blockX(), context.blockY(), context.blockZ(), face, texture, positions, uvs, context.bakeLayer())) {
+         if (this.baker != null && face != null && this.baker.tryAdd(context.origin(), face, texture, positions, uvs, context.bakeLayer())) {
             return;
          }
 
@@ -475,7 +475,8 @@ public final class RegionExporter {
       }
    }
 
-   private record QuadContext(BlockState state, BlockPos pos, Vec3 offset, double blockX, double blockY, double blockZ, boolean emissive) {
+   // What every quad of one model block shares: its corner in the mesh and the random offset some plants get.
+   private record QuadContext(BlockState state, BlockPos pos, Vec3 origin, Vec3 offset, boolean emissive) {
       int bakeLayer() {
          return (this.state.canOcclude() ? BakeCollector.LAYER_SOLID : BakeCollector.LAYER_ALPHA) | (this.emissive ? BakeCollector.LAYER_EMISSIVE : 0);
       }

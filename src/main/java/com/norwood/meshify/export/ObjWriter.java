@@ -47,7 +47,13 @@ public final class ObjWriter {
             Path atlasPath = outputDir.resolve("atlas.png");
             atlas.image().writeToFile(atlasPath);
             onStage.accept(ExportStage.GLB);
-            writeGlb(outputDir, options, mesh, uvs, textures, Files.readAllBytes(atlasPath), warnings);
+            byte[] atlasPng = Files.readAllBytes(atlasPath);
+            // The .glb is an extra; when it fails the OBJ is still written.
+            try {
+               GlbWriter.write(outputDir.resolve(options.name() + ".glb"), mesh, new GlbWriter.Atlas(atlasPng, uvs, alphaModes(textures)));
+            } catch (Exception exception) {
+               warnings.add("glb export failed: " + exception);
+            }
          }
 
          onStage.accept(ExportStage.OBJ);
@@ -56,20 +62,14 @@ public final class ObjWriter {
       }
    }
 
-   private static void writeGlb(
-      Path outputDir, ExportOptions options, MeshBuilder mesh, Map<String, UvTransform> uvs, TextureStore textures, byte[] atlasPng, List<String> warnings
-   ) {
-      try {
-         Map<String, AlphaMode> alphaModes = new LinkedHashMap<>();
+   private static Map<String, AlphaMode> alphaModes(TextureStore textures) {
+      Map<String, AlphaMode> alphaModes = new LinkedHashMap<>();
 
-         for (Entry<String, NativeImage> texture : textures.images().entrySet()) {
-            alphaModes.put(texture.getKey(), classifyAlpha(texture.getKey(), texture.getValue()));
-         }
-
-         GlbWriter.write(outputDir, options.name(), atlasPng, mesh, uvs, alphaModes);
-      } catch (Exception exception) {
-         warnings.add("glb export failed: " + exception);
+      for (Entry<String, NativeImage> texture : textures.images().entrySet()) {
+         alphaModes.put(texture.getKey(), classifyAlpha(texture.getKey(), texture.getValue()));
       }
+
+      return alphaModes;
    }
 
    // glTF alpha mode read from the pixels, so the special exporters get classified without extra flags.
