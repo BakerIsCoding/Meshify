@@ -36,7 +36,7 @@ Meshify is based on [pos2obj](https://www.curseforge.com/minecraft/mc-mods/pos2o
 ## Quick start
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) and [Fabric API](https://modrinth.com/mod/fabric-api) for your Minecraft version.
-2. Build the jars (see [Development](#development)) and copy the one for your version, such as `versions/1.21.11/build/libs/meshify-1.1.3+1.21.11.jar`, into your `mods` folder.
+2. Download the jar for your version from [Releases](https://github.com/BakerIsCoding/Meshify/releases), such as `meshify-2.0.0+1.21.11.jar`, and put it in your `mods` folder.
 3. In game, look at one corner of your build and press <kbd>V</kbd>. Look at the opposite corner and press <kbd>B</kbd>.
 4. Run the export:
 
@@ -57,7 +57,7 @@ The files land in `meshify/castle/` inside the game directory (`.minecraft` for 
 
 Each Minecraft version has its own jar, named after it. The 26.1 jar also runs on 26.1.1 and 26.1.2. The 26.4 jar is built against a snapshot, so a newer snapshot may break it.
 
-Meshify only runs on the client. There is no prebuilt release yet, so build the jar from source as described in [Development](#development) and drop it into `mods` next to Fabric API.
+Meshify only runs on the client. Download the jar for your version from [Releases](https://github.com/BakerIsCoding/Meshify/releases), or build it from source as described in [Development](#development), and drop it into `mods` next to Fabric API.
 
 ## Usage
 
@@ -152,7 +152,7 @@ cd Meshify
 ./gradlew build
 ```
 
-This builds a jar for every supported version into `versions/<version>/build/libs/`, for example `meshify-1.1.3+1.21.11.jar`. On Windows, use `gradlew.bat` instead of `./gradlew`. Gradle runs on Java 25 and downloads it if it is not installed.
+This builds a jar for every supported version into `versions/<version>/build/libs/`, for example `meshify-2.0.0+1.21.11.jar`. On Windows, use `gradlew.bat` instead of `./gradlew`. Gradle runs on Java 25 and downloads it if it is not installed.
 
 All versions share the code in `src/` through [Stonecutter](https://stonecutter.kikugie.dev/). Code that only applies to some versions sits between comments like `//? if >=26.1 {` and `//?}`, and classes that were renamed between versions are swapped by the replacements in `build.gradle`. Each version's Minecraft and Fabric API versions are set in `versions/<version>/gradle.properties`.
 
